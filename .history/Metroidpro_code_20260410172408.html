@@ -1,0 +1,1553 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Metroid FINAL COMPLETE+ 修正版（new31）</title>
+<style>body{margin:0;overflow:hidden;background:black;}canvas{display:block;}</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+let c=document.getElementById("c"),ctx=c.getContext("2d");
+function resize(){c.width=innerWidth;c.height=innerHeight;}onresize=resize;resize();
+
+// ===== STATE =====
+let state="title";
+let loadTimer=120;
+let saveEnabled = true;
+let hasSave = false;
+try {
+  hasSave = localStorage.getItem("metroidSave") !== null;
+} catch(e) {
+  saveEnabled = false;
+}
+// ===== SAVE UI =====
+let saveMessage = "";
+let saveTimer = 0;
+
+// ===== PLAYER =====
+let player={x:100,y:300,spawnX:100,spawnY:300,w:30,h:40,vx:0,vy:0,onGround:false,dir:1,hp:5,maxHp:5,doubleJump:false,morphBall:false,jumpCount:0,prevX:100,prevY:300};
+let keys={},gravity=0.5,bullets=[],enemyBullets=[],camX=0,camY=0,inv=0;
+let jumpPressed = false;
+// ===== SOUND =====
+let bgm = new Audio("title.wav");
+bgm.loop = true;
+bgm.volume = 0.5;
+// ===== MOUSE =====
+let mouseX=0, mouseY=0;
+c.addEventListener("mousemove", e => { mouseX = e.clientX + camX; mouseY = e.clientY + camY; });
+c.addEventListener("click", shootBullet);
+
+// ===== WORLD =====
+let size=5;
+let types=["jungle","volcano","factory","lab","tower","sky","secret","void","core"];
+
+
+
+let wx=0,wy=0;
+
+// ===== ROOMS =====
+let rooms={//4/5
+
+ jungle:{color:"#0b1f0b",platforms:[{x:0,y:550,w:4000,h:50},{x:200,y:450,w:200,h:20},{x:500,y:350,w:200,h:20},{x:900,y:480,w:200,h:20},{x:1300,y:400,w:200,h:20},{x:1700,y:300,w:120,h:120}],
+ walls:[{x:0,y:0,w:20,h:600},{x:3980,y:0,w:20,h:600}],hidden:{x:1000,y:580,w:100,h:30},warp:{x:1750,y:260,w:60,h:60},secretPass:{x:1720,y:320,w:80,h:40}},
+
+
+ volcano:{color:"#2b0f0f",platforms:[
+  {x:0,y:550,w:1900,h:50},     // 左床
+  {x:2100,y:550,w:400,h:50},   // 穴の右
+  {x:2900,y:550,w:1100,h:50},  // さらに右
+
+  {x:300,y:450,w:200,h:20},
+  {x:700,y:350,w:200,h:20},
+  {x:1200,y:300,w:200,h:20}
+],
+
+lava:{x:0,y:580,w:4000,h:50},
+
+},
+
+ factory:{color:"#0f1b2b",platforms:[{x:0,y:550,w:4000,h:50},{x:400,y:450,w:200,h:20},{x:800,y:350,w:200,h:20},{x:1400,y:300,w:200,h:20}],electric:{x:1200,y:520,w:200,h:20}},
+
+ lab:{color:"#111122",platforms:[{x:0,y:550,w:4000,h:50},{x:200,y:450,w:200,h:20},{x:600,y:350,w:200,h:20},{x:1000,y:250,w:200,h:20}]},
+
+ sky:{color:"#88ccff",platforms:[{x:0,y:550,w:4000,h:50},{x:300,y:400,w:200,h:20},{x:700,y:300,w:200,h:20},{x:1100,y:200,w:200,h:20}],
+warpTower:{x:1400,y:500,w:80,h:80,color:"purple"}},
+
+ secret:{color:"#222244",platforms:[{x:0,y:550,w:4000,h:50},{x:500,y:450,w:200,h:20}],
+ hidden:
+    {x:800,y:500,w:100,h:30}, // 既存のhidden
+    walls: [
+    // ===== 立方体ブロック（上下左右進行不可） =====
+    {x:1200,y:450,w:60,h:60}, // 立方体1
+    {x:1300,y:400,w:60,h:60}, // 立方体2
+    {x:1400,y:350,w:60,h:60}, // 立方体3
+    {x:1500,y:300,w:60,h:60}, // 立方体4
+    {x:1600,y:250,w:60,h:60}, // 立方体5
+    {x:1700,y:200,w:60,h:60}, // 立方体6
+    {x:1800,y:150,w:60,h:60}, // 立方体7
+    {x:1900,y:100,w:60,h:60}, // 立方体8
+    {x:2000,y:50,w:60,h:60},  // 立方体9
+    {x:2100,y:0,w:60,h:60},   // 立方体10
+    
+    // 迷路状配置
+    {x:1250,y:475,w:60,h:60}, // 立方体11
+    {x:1350,y:425,w:60,h:60}, // 立方体12
+    {x:1450,y:375,w:60,h:60}, // 立方体13
+    {x:1550,y:325,w:60,h:60}, // 立方体14
+    {x:1650,y:275,w:60,h:60}, // 立方体15
+    {x:1750,y:225,w:60,h:60}, // 立方体16
+    {x:1850,y:175,w:60,h:60}, // 立方体17
+    {x:1950,y:125,w:60,h:60}, // 立方体18
+    {x:2050,y:75,w:60,h:60},  // 立方体19
+    {x:2150,y:25,w:60,h:60},  // 立方体20
+    
+    // 中央の立方体群
+    {x:1600,y:400,w:80,h:80}, // 中央大立方体1
+    {x:1700,y:350,w:80,h:80}, // 中央大立方体2
+    {x:1800,y:300,w:80,h:80}, // 中央大立方体3
+    {x:1900,y:250,w:80,h:80}, // 中央大立方体4
+    {x:2000,y:200,w:80,h:80}, // 中央大立方体5
+    
+    // 小さな立方体群
+    {x:1300,y:500,w:40,h:40}, // 小立方体1
+    {x:1400,y:480,w:40,h:40}, // 小立方体2
+    {x:1500,y:460,w:40,h:40}, // 小立方体3
+    {x:1600,y:440,w:40,h:40}, // 小立方体4
+    {x:1700,y:420,w:40,h:40}, // 小立方体5
+    {x:1800,y:400,w:40,h:40}, // 小立方体6
+    {x:1900,y:380,w:40,h:40}, // 小立方体7
+    {x:2000,y:360,w:40,h:40}, // 小立方体8
+    {x:2100,y:340,w:40,h:40}, // 小立方体9
+    {x:2200,y:320,w:40,h:40}  // 小立方体10
+   ]
+  },
+
+ void:{color:"black",platforms:[{x:0,y:580,w:4000,h:50}]},
+
+ core:{color:"#220022",platforms:[{x:0,y:580,w:4000,h:50}],boss:true},
+
+ tower:{color:"#111",platforms:[{x:0,y:550,w:4000,h:50},{x:200,y:500,w:200,h:20},{x:400,y:420,w:200,h:20},{x:600,y:340,w:200,h:20},{x:800,y:260,w:200,h:20},{x:1000,y:180,w:200,h:20}],
+
+warpSky:{x:2400,y:120,w:80,h:80,color:"purple"}},
+//2026-4/2--3:39---------
+ morph:{color:"#081020",platforms:[{x:0,y:560,w:4000,h:40},{x:0,y:550,w:4000,h:40},{x:3100,y:460,w:800,h:20},{x:2100,y:520,w:400,h:20},{x:1000,y:420,w:600,h:20},{x:200,y:520,w:300,h:20}],walls:[{x:2400,y:300,w:20,h:260},{x:1400,y:350,w:20,h:210}],morphBall:{x:220,y:480,w:30,h:30,name:"もーふボール"},savePoint:{x:3500,y:500,w:40,h:40}},
+
+ morphAlt:{color:"#102030",platforms:[{x:0,y:560,w:4000,h:40},{x:0,y:550,w:4000,h:40},{x:2600,y:470,w:400,h:20},{x:1800,y:390,w:300,h:20},{x:1200,y:320,w:250,h:20},{x:400,y:450,w:200,h:20}],walls:[{x:3200,y:300,w:20,h:260},{x:800,y:380,w:20,h:180}],warpToMorph:{x:3700,y:520,w:80,h:40}}
+
+};
+let world=[];
+let genX = 0;
+let genY = 0;
+let loadStep = 0; // 表示用
+
+
+// ===== ENEMIES =====
+let thunders = [];
+let enemies={};
+
+let boss = null; 
+
+for(let t of types){
+
+let count = (t==="factory") ? 7 : 5;
+
+enemies[t]=[...Array(count)].map((_,i)=>({
+  x:800+i*300,
+  y:500,
+  w:20,
+  h:20,
+  hp:2,
+  type:t,
+  vx:0,
+  vy:0,
+  onGround:false,
+  dir:1
+}));
+
+}
+
+enemies.morph = [
+  {x:3200,y:520,w:20,h:20,hp:2,type:"normal"},
+  {x:2600,y:430,w:20,h:20,hp:2,type:"fly"},
+  {x:1800,y:520,w:20,h:20,hp:2,type:"hoverCrab"}
+];
+
+enemies.morphAlt = [
+  {x:1900,y:290,w:20,h:20,hp:2,type:"crazyFly"},
+  {x:2400,y:430,w:20,h:20,hp:2,type:"normal"},
+  {x:3100,y:520,w:20,h:20,hp:2,type:"jungle"}
+];
+
+// ===== 安全に配列作って追加 =====
+function safePushEnemies(area,obj){ if(!enemies[area]) enemies[area]=[]; enemies[area].push(obj); }
+function safePushRoomPlatforms(area,obj){ if(!rooms[area].platforms) rooms[area].platforms=[]; rooms[area].platforms.push(obj); }
+function safePushRoomWalls(area,obj){ if(!rooms[area].walls) rooms[area].walls=[]; rooms[area].walls.push(obj); }
+
+// ===== 右側壁・足場・敵まとめデータ =====
+const wallsData = {
+  jungle: [
+    {x:2200,y:400,w:20,h:150},
+    {x:1500,y:500,w:20,h:50},
+    {x:1500,y:450,w:20,h:50},
+    {x:1500,y:400,w:20,h:50},
+    {x:1600,y:350,w:20,h:50},
+    {x:1600,y:300,w:20,h:50},
+    {x:1600,y:250,w:20,h:50},
+    {x:1600,y:400,w:20,h:50},
+    {x:1600,y:450,w:20,h:50},
+    {x:1600,y:500,w:20,h:50},
+    {x:1900,y:250,w:20,h:50},
+    {x:1900,y:300,w:20,h:50},
+    {x:1900,y:350,w:20,h:50},
+    {x:1900,y:400,w:20,h:50},
+    {x:1900,y:450,w:20,h:50},
+    {x:1700,y:500,w:20,h:50}
+  ],
+  volcano: [{x:2000,y:350,w:20,h:150}],
+  factory: [
+    {x:1700,y:250,w:20,h:200},
+    {x:1650,y:370,w:20,h:80},
+    {x:1850,y:290,w:20,h:80}
+  ],
+  lab: [{x:1500,y:200,w:20,h:200}],
+  sky: [{x:1500,y:150,w:20,h:200}],
+  tower: [
+    {x:1300,y:100,w:20,h:200},
+    // ===== 天井ブロック =====
+    {x:0,y:0,w:4000,h:30}, // メイン天井
+    {x:200,y:30,w:100,h:20}, // 天井ブロック1
+    {x:400,y:30,w:100,h:20}, // 天井ブロック2
+    {x:600,y:30,w:100,h:20}, // 天井ブロック3
+    {x:800,y:30,w:100,h:20}, // 天井ブロック4
+    {x:1000,y:30,w:100,h:20}, // 天井ブロック5
+    {x:1200,y:30,w:100,h:20}, // 天井ブロック6
+    {x:1400,y:30,w:100,h:20}, // 天井ブロック7
+    {x:1600,y:30,w:100,h:20}, // 天井ブロック8
+    {x:1800,y:30,w:100,h:20}, // 天井ブロック9
+    {x:2000,y:30,w:100,h:20}, // 天井ブロック10
+    {x:2200,y:30,w:100,h:20}, // 天井ブロック11
+    {x:2400,y:30,w:100,h:20}, // 天井ブロック12
+    {x:2600,y:30,w:100,h:20}, // 天井ブロック13
+    {x:2800,y:30,w:100,h:20}, // 天井ブロック14
+    {x:3000,y:30,w:100,h:20}, // 天井ブロック15
+    {x:3200,y:30,w:100,h:20}, // 天井ブロック16
+    {x:3400,y:30,w:100,h:20}, // 天井ブロック17
+    {x:3600,y:30,w:100,h:20}, // 天井ブロック18
+    {x:3800,y:30,w:100,h:20},  // 天井ブロック19
+
+    {x:3980,y:0,w:20,h:600}//右端の壁
+  ]
+};
+
+const platformsData = {
+  jungle: [
+    // 地上の足場
+    {x:2500,y:450,w:200,h:20},
+    {x:1550,y:500,w:50,h:20},
+    {x:1550,y:450,w:50,h:20},
+    {x:1500,y:450,w:50,h:20},
+    {x:1500,y:500,w:50,h:20},
+    {x:1500,y:400,w:50,h:20},
+    {x:1550,y:400,w:50,h:20},
+    {x:1600,y:250,w:50,h:20},
+    {x:1650,y:250,w:50,h:20},
+    {x:1700,y:250,w:50,h:20},
+    {x:1750,y:250,w:50,h:20},
+    {x:1800,y:250,w:50,h:20},
+    {x:1850,y:250,w:50,h:20},
+    
+     // エレベーターのプラットフォーム
+    {x:2300,y:470,w:80,h:20}, // 新しいエレベーターのプラットフォーム
+    
+    // ===== 地下エリア（エレベーターより下） =====
+    
+    
+    // 地下の段差地形
+    {x:200,y:750,w:100,h:20},
+    {x:400,y:700,w:100,h:20},
+    {x:600,y:650,w:100,h:20},
+    {x:800,y:600,w:100,h:20},
+    {x:1000,y:550,w:100,h:20},
+    
+    // 地下の孤立足場
+    {x:1500,y:750,w:150,h:20},
+    {x:1800,y:700,w:150,h:20},
+    {x:2100,y:650,w:150,h:20},
+    {x:2400,y:600,w:150,h:20},
+    {x:2700,y:550,w:150,h:20},
+    
+   
+    
+    // 地下の秘密エリア
+    {x:3000,y:750,w:80,h:20},
+    {x:3200,y:700,w:80,h:20},
+    {x:3400,y:650,w:80,h:20},
+    {x:3600,y:600,w:80,h:20},
+    {x:3800,y:550,w:80,h:20},
+    
+    // 地下の迷路状足場
+    {x:100,y:900,w:50,h:20},
+    {x:200,y:900,w:50,h:20},
+    {x:300,y:850,w:50,h:20},
+    {x:400,y:850,w:50,h:20},
+    {x:500,y:800,w:50,h:20},
+    {x:600,y:800,w:50,h:20},
+    {x:700,y:750,w:50,h:20},
+    {x:800,y:750,w:50,h:20},
+    
+    // 地下の広場
+    {x:1200,y:900,w:300,h:20},
+    {x:1600,y:850,w:300,h:20},
+    {x:2000,y:800,w:300,h:20},
+    
+    // 地下の最深部
+    {x:0,y:1000,w:500,h:20},
+    {x:600,y:1000,w:500,h:20},
+    {x:1200,y:1000,w:500,h:20},
+    {x:1800,y:1000,w:500,h:20},
+    {x:2400,y:1000,w:500,h:20},
+    {x:3000,y:1000,w:500,h:20},
+    {x:3500,y:1000,w:500,h:20}
+  ],
+  volcano: [
+    {x:2000,y:400,w:150,h:20},
+    {x:2300,y:350,w:200,h:20}
+  ],
+  factory: [
+    {x:1750,y:350,w:150,h:20},
+    {x:2000,y:300,w:200,h:20},
+    {x:1600,y:400,w:200,h:20},
+    {x:1800,y:320,w:150,h:20},
+    {x:2000,y:240,w:150,h:20}
+  ],
+  lab: [
+    {x:1550,y:300,w:150,h:20},
+    {x:1800,y:250,w:200,h:20}
+  ],
+  sky: [
+    {x:1550,y:250,w:150,h:20},
+    {x:1800,y:200,w:200,h:20}
+  ],
+  tower: [
+    {x:1350,y:200,w:150,h:20},
+    {x:1600,y:150,w:200,h:20}
+  ]
+};
+
+const enemiesData = {
+  jungle: [
+    // 地上の敵
+    {x:2250,y:500,w:20,h:20,hp:2,type:"jungle"},
+    
+    // ===== 地下エリアの敵 =====
+    // 地下の段差地形の敵
+    {x:250,y:700,w:20,h:20,hp:2,type:"jungle"},
+    {x:450,y:650,w:20,h:20,hp:2,type:"jungle"},
+    
+    
+    
+    
+    
+    
+    // 地下の迷路状足場の敵
+    {x:150,y:850,w:20,h:20,hp:2,type:"jungle"},
+    {x:350,y:800,w:20,h:20,hp:2,type:"jungle"},
+    {x:550,y:750,w:20,h:20,hp:2,type:"jungle"},
+    {x:750,y:700,w:20,h:20,hp:2,type:"jungle"},
+    
+    // 地下の広場の敵
+    {x:1350,y:850,w:20,h:20,hp:3,type:"normal"},
+    {x:1750,y:800,w:20,h:20,hp:3,type:"normal"},
+    {x:2150,y:750,w:20,h:20,hp:3,type:"normal"},
+    
+    
+  ],
+
+ volcano: [
+    {x:2050,y:400,w:20,h:20,hp:2,type:"volcano"},
+    {x:2200,y:500,w:20,h:20,hp:12,type:"normal"} ,// ← カニ追加
+    {x:2500,y:500,w:20,h:20,hp:2,type:"normal"} ,// ← カニ追加
+    {x:2600,y:300,w:20,h:20,hp:12,type:"normal"} ,// ← カニ追加
+    {x:3500,y:500,w:20,h:20,hp:2,type:"normal"} ,// ← カニ追加
+    { x:2000, y:300, w:20, h:20, hp:2, type:"hoverCrab" },
+     { x:3000, y:300, w:20, h:20, hp:2, type:"hoverCrab" },
+     { x:2900, y:300, w:20, h:20, hp:2, type:"hoverCrab" },
+     { x:3000, y:200, w:20, h:20, hp:2, type:"hoverCrab" },
+    { x:2200, y:300, w:20, h:20, hp:2, type:"crazyFly" },
+  ],
+
+  factory: [
+    {x:1800,y:330,w:20,h:20,hp:2,type:"factory"},
+    {x:2800,y:250,w:20,h:20,hp:2,type:"factory"},
+    {x:2000,y:300,w:20,h:20,hp:2,type:"fly"}, // ← 10角形追加
+     { x:2200, y:300, w:20, h:20, hp:2, type:"crazyFly" },
+       { x:2300, y:300, w:20, h:20, hp:2, type:"crazyFly" },
+       { x:2500, y:300, w:20, h:20, hp:2, type:"crazyFly" },
+       { x:2200, y:300, w:20, h:20, hp:2, type:"crazyFly2" },
+       { x:2300, y:300, w:20, h:20, hp:2, type:"crazyFly2" },
+       { x:2500, y:300, w:20, h:20, hp:2, type:"crazyFly2" },
+  ],
+
+  lab: [{x:1600,y:280,w:20,h:20,hp:2,type:"lab"}],
+  sky: [{x:1600,y:250,w:20,h:20,hp:2,type:"sky"}],
+  tower: [{x:1400,y:180,w:20,h:20,hp:2,type:"tower"}]
+};
+
+// ===== 一括追加 =====
+for(let room in wallsData){
+  rooms[room].walls = rooms[room].walls || [];
+  rooms[room].walls.push(...wallsData[room]);
+}
+
+for(let room in platformsData){
+  rooms[room].platforms = rooms[room].platforms || [];
+  rooms[room].platforms.push(...platformsData[room]);
+}
+
+for(let room in enemiesData){
+  enemies[room] = enemies[room] || [];
+  enemies[room].push(...enemiesData[room]);
+}
+
+rooms.volcano.savePoint = {x:500,y:500,w:40,h:40};//--------save
+
+
+
+rooms.jungle.elevatorMove = {x:2300,y:470,w:80,h:80, baseY:370, offset:0};
+
+// アイテム・通路
+rooms.factory.electric = {x:1800,y:330,w:100,h:20};
+// ★ 二段ジャンプアイテム
+rooms.factory.doubleJumpItem = {x:1600,y:280,w:30,h:30,taken:false};
+
+// ===== HIT =====
+function hit(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
+
+// ===== SHOOT =====------------------------------------
+function shootBullet(){
+  let px = player.x + player.w/2;
+  let py = player.y + player.h/2;
+  let dx = mouseX - px;
+  let dy = mouseY - py;
+  let len = Math.sqrt(dx*dx+dy*dy);
+  if(len===0) return;
+  let speed = 10;
+  bullets.push({x:px, y:py, vx:dx/len*speed, vy:dy/len*speed, w:8, h:8});
+}
+//save-----------------------------------------------------2026/21:46
+function saveGame(){
+  if(!saveEnabled) return;
+  let data = {
+    wx, wy,
+    player,
+    world
+  };
+  try {
+    localStorage.setItem("metroidSave", JSON.stringify(data));
+    hasSave = true;
+    saveMessage = "SAVED!";
+    saveTimer = 120;
+  } catch(e) {
+    saveEnabled = false;
+  }
+}
+
+function loadGame(){
+  if(!saveEnabled) return;
+  let data;
+  try {
+    data = localStorage.getItem("metroidSave");
+  } catch(e) {
+    saveEnabled = false;
+    return;
+  }
+
+  if(data){
+    let d = JSON.parse(data);
+    wx = Math.min(size-1, Math.max(0, d.wx || 0));
+    wy = Math.min(size-1, Math.max(0, d.wy || 0));
+    Object.assign(player, d.player);
+    world = JSON.parse(JSON.stringify(d.world));
+
+    state = "game";
+    camX = player.x - c.width / 2;
+    camY = player.y - c.height / 2;
+    player.prevX = player.x;
+    player.prevY = player.y;
+    bgm.play().catch(() => {});
+  }
+}
+
+
+// ===== UPDATE ===============================================
+function update(){
+
+  // ▼ loading専用処理
+  if(state==="loading"){
+
+    for(let i=0;i<2;i++){
+
+      if(genY < size){
+
+        let type = types[(genX+genY)%types.length];
+        let base = JSON.parse(JSON.stringify(rooms[type]));
+        let roomType = type;
+        let state = { doubleJumpTaken:false };
+
+        if(genX === 0 && genY === size - 1){
+          roomType = "morph";
+          base = JSON.parse(JSON.stringify(rooms.morph));
+          state = { doubleJumpTaken:false, morphTaken:false, enteredFromRight:false };
+        } else if(genX === size - 1 && genY === 0){
+          roomType = "morphAlt";
+          base = JSON.parse(JSON.stringify(rooms.morphAlt));
+          state = { doubleJumpTaken:false };
+        }
+
+        world[genY][genX] = {
+          type: roomType,
+          base: base,
+          state: state
+        };
+
+        if(genX === 1 && genY === 4){
+          base.elevatorUp = {x:2100, y:520, w:80, h:80};
+        }
+
+        genX++;
+
+        if(genX >= size){
+          genX = 0;
+          genY++;
+        }
+
+        loadStep = Math.floor((genY*size+genX)/(size*size)*4);
+
+      }else{
+        state="game";
+        break;
+      }
+
+    }
+
+    return;
+  }
+
+  if(state !== "game"){
+    return;
+  }
+
+  // ▼ここから通常ゲーム処理
+
+ if(inv>0) inv--;
+
+let cell = world[wy][wx];
+let room = cell.base;
+let stateData = cell.state;
+let roomType = cell.type;
+
+if(saveTimer>0) saveTimer--;
+
+if(room.elevatorMove){
+  let elev = room.elevatorMove;
+
+  // ★ ゆるい当たり判定
+  let playerOnElev =
+    player.x < elev.x + elev.w &&
+    player.x + player.w > elev.x &&
+    player.y + player.h >= elev.y - 15 &&
+    player.y + player.h <= elev.y + 15;
+
+  if(elev.offset === undefined) elev.offset = 0;
+
+  // ★ 操作
+  if(playerOnElev){
+    if(keys["w"] || keys[" "]){
+      elev.offset += 3;
+    }
+    if(keys["s"]){
+      elev.offset -= 3;
+    }
+  }
+
+  // ★ 制限
+  if(elev.offset > 5000) elev.offset = 5000;//地下まで5km!とまるより先にワープ
+
+ if(elev.offset < 100) elev.offset = 100;
+
+  elev.y = elev.baseY + elev.offset;
+
+  // ★ 足場同期
+  if(room.platforms && room.platforms.length > 0){
+    room.platforms[room.platforms.length - 1].y = elev.y;
+  }
+
+  // ★ プレイヤー追従
+  if(playerOnElev){
+    player.y = elev.y - player.h;
+    player.vy = 0;
+  }
+
+
+  if(playerOnElev && elev.offset >= 900){
+    if(wy < size-1){
+    wy++;
+
+    player.x = elev.x;
+    player.y = 100;
+    player.spawnX = elev.x;
+    player.spawnY = 100;
+  }
+
+  player.vx = 0;
+  player.vy = 0;
+
+  elev.offset = 0; // リセット
+  elev.y = elev.baseY; // エレベーター位置もリセット
+  
+  // 足場も元の位置に戻す
+  if(room.platforms && room.platforms.length > 0){
+    room.platforms[room.platforms.length - 1].y = elev.baseY;
+  }
+}
+//4/4
+ /*if(playerOnElev && elev.offset <= -199){//先にとまるうえ用のエレベータ用
+  if(wy < size-1){
+    wy++;
+
+    player.x = elev.x;
+    player.y = 100;
+  }
+
+  player.vx = 0;
+  player.vy = 0;
+
+  elev.offset = 0; // リセット
+}
+  */
+}
+
+if(roomType === "morph" && !stateData.enteredFromRight && player.x < 200){
+  player.x = 3850;
+  player.y = 500;
+  player.vx = 0;
+  player.vy = 0;
+  stateData.enteredFromRight = true;
+}
+
+ // movement (WASD対応)
+ if(keys.ArrowLeft || keys.a){player.vx=-5;player.dir=-1;} 
+ else if(keys.ArrowRight || keys.d){player.vx=5;player.dir=1;} 
+ else player.vx=0;
+let jumpNow = (keys[" "] || keys.w);
+
+//jump
+if(jumpNow && !jumpPressed){
+  if(player.onGround){
+    player.vy=-14;
+    player.jumpCount=1;
+    player.onGround=false;
+  }
+  else if(player.jumpCount<2){
+    player.vy=-12;
+    player.jumpCount++;
+  }
+  else if(player.doubleJump && player.jumpCount<3){
+    player.vy=-12;
+    player.jumpCount++;
+  } 
+}
+
+jumpPressed = jumpNow;
+ player.vy+=gravity;
+ player.vy=Math.min(player.vy,20);
+ player.x+=player.vx; player.y+=player.vy; player.onGround=false;
+
+ // platforms--------------------------
+ for(let p of room.platforms){
+  if(player.vy>=0 && player.x<p.x+p.w && player.x+player.w>p.x && player.y+player.h<=p.y+10 && player.y+player.h>=p.y-10){
+   player.y=p.y-player.h; player.vy=0; player.onGround=true; player.jumpCount=0;
+  }
+ }
+
+ // left-edge room transition
+ if(player.x < 0 && wx > 0){
+  wx = Math.max(0, wx - 1);
+  player.x = 3950;
+ }
+
+ // walls---------------------------------------
+ if(room.walls){for(let w of room.walls){if(hit(player,w)){if(player.x<w.x)player.x=w.x-player.w;else player.x=w.x+w.w;}}}
+
+ // special areas
+ if(room.secretPass && hit(player,room.secretPass)){wx=Math.min(size-1,wx+1);player.x=100;}
+ if(room.warpToMorph && hit(player,room.warpToMorph)){
+  wx = 0;
+  wy = size - 1;
+  player.x = 3850;
+  player.y = 500;
+  player.vx = 0;
+  player.vy = 0;
+  if(world[wy] && world[wy][wx] && world[wy][wx].state){
+    world[wy][wx].state.enteredFromRight = true;
+  }
+ }
+ if(room.warp && hit(player,room.warp)){wx=Math.min(size-1,wx+1);player.x=50;}
+
+
+ 
+//savepoint---------------------------
+
+if(room.savePoint && hit(player,room.savePoint)){
+  if(keys["1"]) saveGame();
+}
+
+if(room.morphBall && !stateData.morphTaken && hit(player, room.morphBall)){
+  player.morphBall = true;
+  player.w = 30;
+  player.h = 30;
+  stateData.morphTaken = true;
+  saveMessage = "MORPH BALL GET! もーふボール";
+  saveTimer = 180;
+}
+
+
+
+
+
+// ===== ボス生成 =====
+if(roomType==="core" && !stateData.bossDead){
+  if(!boss){
+    boss = {x:2000,y:300,w:120,h:120,hp:50,vx:3,vy:0};
+  }
+}
+
+
+if(room.warpSky && hit(player,room.warpSky)){
+  for(let y=0;y<size;y++){
+    for(let x=0;x<size;x++){
+      if(world[y][x].type === "sky"){  // ← 修正
+        wx = x;
+        wy = y;
+      }
+    }
+  }
+  player.x = 100;
+  player.y = 100;
+}
+
+// 上層へ
+if(room.warpTower && hit(player,room.warpTower)){
+  for(let y=0;y<size;y++){
+    for(let x=0;x<size;x++){
+      if(world[y][x].type === "tower"){ // ← 修正
+        wx = x;
+        wy = y;
+      }
+    }
+  }
+  player.x=2300;
+  player.y=100;
+}
+
+ if(room.hidden && hit(player,room.hidden)){wx=Math.min(size-1,wx+1);player.x=50;}
+ if(room.lava && hit(player,room.lava) && inv<=0){player.hp--;player.x=player.spawnX;player.y=player.spawnY;inv=60;}
+
+// 落とし穴
+if(room.pits){
+ for(let pit of room.pits){
+  if(hit(player,pit)){
+   player.hp--;
+
+   player.vy = 15; // 落ちる演出
+   inv = 60;
+  }
+ }
+}
+
+// ===== 雷生成（テスト用：一定時間ごと）=====
+if(state==="game" && roomType==="factory" && Math.random() < 0.008){
+  thunders.push({
+    x: player.x + (Math.random()*200-100),
+    y: 0,
+    w: 20,
+    h: 600,
+    timer: 119
+  });
+}
+
+// ===== 雷更新 =====
+for(let t of thunders){
+  t.timer--;
+}
+
+// ===== 当たり判定 =====
+for(let t of thunders){
+  if(t.timer < 30){ // 発動中だけ当たる
+    if(hit(player,t) && inv<=0){
+      player.hp--;
+      inv = 60;
+    }
+  }
+}
+
+// 消す
+thunders = thunders.filter(t => t.timer > 0);
+ if(room.electric && hit(player,room.electric) && inv<=0){if(Math.random()<0.1){player.hp--;player.x=player.spawnX;player.y=player.spawnY;inv=60;}}
+
+ // 二段ジャンプアイテム取得
+let dj = room.doubleJumpItem;
+if(dj && !stateData.doubleJumpTaken && hit(player,dj)){
+  player.doubleJump = true;
+  stateData.doubleJumpTaken = true;
+}//保存
+
+ // enemies--------------------------
+
+ let er = enemies[roomType];
+ if(er){
+  for(let e of er){
+   let dx=player.x-e.x; let dy=player.y-e.y;
+   
+if(e.originX === undefined){
+  e.originX = e.x;
+  e.originY = e.y;
+}
+    if(e.type==="normal"){ 
+
+  // 左右移動
+  if(Math.abs(dx)<300) e.vx = Math.sign(dx) * 2 + Math.sin(Date.now()/300)*1; 
+  else e.vx = Math.sin(Date.now()/500)*2;
+  e.x += e.vx;
+
+ 
+
+  // ジャンプ
+  if(Math.random()<0.005 && e.onGround){
+    e.vy = -8 - Math.random()*4; 
+    e.onGround = false;
+  }
+
+ // ★ 地面フラグリセット
+  e.onGround = false;
+
+  // ★ 先に重力
+  e.vy = (e.vy||0) + gravity;
+  e.vy = Math.min(e.vy,20);
+  e.y += e.vy;
+
+  // ★ あとで地面判定
+  for(let p of room.platforms){
+    if(e.vy>=0 &&
+       e.x<p.x+p.w && e.x+e.w>p.x &&
+       e.y+e.h<=p.y+10 && e.y+e.h>=p.y-10){
+
+      e.y = p.y - e.h;
+      e.vy = 0;
+      e.onGround = true;
+    }
+  }
+}
+
+    else if(e.type==="fly"){
+      // 回転＋ホバリング＋急降下
+      e.angle = (e.angle||0) + 0.05;
+      let radius = 50 + 20*Math.sin(Date.now()/300);
+      e.x = e.originX + Math.cos(e.angle)*radius;
+      e.y = e.originY + Math.sin(e.angle)*radius;
+
+      // 時々プレイヤー方向にダイブ
+      if(Math.random()<0.01){
+        e.x += Math.sign(dx)*5;
+        e.y += Math.sign(dy)*5;
+      }
+   }
+
+else if(e.type==="hoverCrab"){
+  // 毎フレ更新（←あえてやる）
+  e.originX = e.x;
+  e.originY = e.y;
+
+  // ふわふわ追尾
+  e.vx = Math.sign(dx)*2 + Math.sin(Date.now()/200)*1;
+  e.vy = Math.sign(dy)*1 + Math.cos(Date.now()/200)*1;
+
+  e.x += e.vx/2;
+  e.y += e.vy;
+}
+
+else if(e.type==="crazyFly"){
+  e.originX = e.x;
+  e.originY = e.y;
+
+  // Timer
+  e.t = (e.t||0) + 1;
+
+  // Slow rotation
+  e.angle = (e.angle||0) + 0.0075;
+
+  // Fixed radius (mechanical feel)
+  let r = 10;
+
+  e.x = e.originX + Math.cos(e.angle)*r;
+  e.y = e.originY + Math.sin(e.angle)*r;
+
+  // Laser shooting - every 90 frames
+  if(e.t % 90 === 0){
+    let dx = player.x - e.x;
+    let dy = player.y - e.y;
+    let len = Math.sqrt(dx*dx + dy*dy);
+    if(len > 0){
+      enemyBullets.push({
+        x: e.x,
+        y: e.y,
+        vx: dx/len * 8,
+        vy: dy/len * 8,
+        w: 12,
+        h: 12,
+        type: "laser"
+      });
+    }
+  }
+
+  // Periodic acceleration
+  if(e.t % 60 < 20){
+    e.x += Math.sign(dx)*10;
+    e.y += Math.sign(dy)*1.9;
+  }
+}
+
+else if(e.type==="crazyFly2"){
+  e.t = (e.t||0) + 1;
+  if(!e.mode) e.mode = "orbit";
+
+  // ===== 周回 =====
+  if(e.mode==="orbit"){
+    e.angle = (e.angle||0) + 0.06;
+
+    let r = 120;
+
+    // 目標位置（直接代入しない！）
+    let tx = player.x + Math.cos(e.angle)*r;
+    let ty = player.y + Math.sin(e.angle)*r;
+
+    // ★ スムーズ追従（バネっぽい動き：今風）
+    let ax = (tx - e.x) * 0.05;  // ← 加速度（ここで速度感変わる）
+    let ay = (ty - e.y) * 0.05;
+
+    e.vx = (e.vx||0) + ax;
+    e.vy = (e.vy||0) + ay;
+
+    // 減衰（これも重要：機械っぽさ）
+    e.vx *= 0.9;  // ← 小さいほど遅く・安定
+    e.vy *= 0.9;
+
+    e.x += e.vx;
+    e.y += e.vy;
+
+    // 一定時間で突進
+    if(e.t % 180 === 0){
+      e.mode = "charge";
+
+      let dx2 = player.x - e.x;
+      let dy2 = player.y - e.y;
+      let len = Math.sqrt(dx2*dx2 + dy2*dy2) || 1;
+
+      e.vx = dx2/len * 5; // ← ★ここが突進速度
+      e.vy = dy2/len * 5;
+    }
+  }
+
+  // ===== 突進 =====
+  else if(e.mode==="charge"){
+    e.x += e.vx;
+    e.y += e.vy;
+
+    // 少しずつ減速（完全直線じゃなく自然）
+    e.vx *= 0.97; // ← 小さいほどすぐ止まる
+    e.vy *= 0.97;
+
+    // 戻る
+    if(Math.abs(e.vx)+Math.abs(e.vy) < 1){
+      e.mode = "orbit";
+    }
+  }
+}
+  
+else if(e.type==="factory"){
+  if(!e.dir) e.dir = 1;
+
+  e.x += e.dir * 2;
+
+  // 壁っぽく反転
+  if(e.x > 3000 || e.x < 500){
+    e.dir *= -1;
+  }
+
+  // ちょい上下揺れ
+  e.y += Math.sin(Date.now()/300) * 0.5;
+
+  if(hit(player,e) && inv<=0){
+    player.hp--;
+    inv = 60;
+  }
+}
+  
+
+   else if(e.type==="jungle"){if(Math.abs(dx)<200)e.x+=Math.sign(dx)*2;}
+
+   else if(e.type==="volcano"){e.y+=Math.sin(Date.now()/200)*2;}
+
+
+
+   else{e.x+=Math.sign(dx)*1.5; e.y+=Math.sign(dy)*1.5;}
+
+  if(hit(player,e) && inv<=0){player.hp--;player.vx += (player.x<e.x?-8:8);player.vy=-6;inv=60;}
+
+   for(let b of bullets){if(hit(b,e)){e.hp--; b.x=9999;}}
+
+
+  }
+
+
+if(boss){
+  let dx = player.x - boss.x;
+
+  boss.vx = Math.sign(dx)*3;
+  boss.x += boss.vx;
+
+  // ジャンプ攻撃
+  if(Math.random()<0.02 && boss.vy===0){
+    boss.vy = -12;
+  }
+
+  boss.vy += gravity;
+  boss.y += boss.vy;
+
+  // 床判定
+  for(let p of room.platforms){
+    if(boss.vy>=0 &&
+       boss.x<p.x+p.w && boss.x+boss.w>p.x &&
+       boss.y+boss.h<=p.y+10 && boss.y+boss.h>=p.y-10){
+      boss.y = p.y - boss.h;
+      boss.vy = 0;
+    }
+  }
+
+  // プレイヤー当たり
+  if(hit(player,boss) && inv<=0){
+    player.hp--;
+    player.vx += (player.x<boss.x?-10:10);
+    player.vy = -8;
+    inv = 60;
+  }
+
+  // 弾ダメージ
+  for(let b of bullets){
+    if(hit(b,boss)){
+      boss.hp--;
+      b.x=9999;
+    }
+  }
+
+  // 撃破
+  if(boss.hp<=0){
+    stateData.bossDead = true;
+    boss = null;
+  }
+}
+
+ enemies[roomType] = er.filter(e=>e.hp>0);
+ }
+
+ for(let b of bullets){b.x+=b.vx; b.y+=b.vy;}
+ bullets=bullets.filter(b=>b.x>0 && b.x<4000 && b.y>0 && b.y<1000);
+
+ // Enemy bullets movement
+ for(let b of enemyBullets){b.x+=b.vx; b.y+=b.vy;}
+ enemyBullets=enemyBullets.filter(b=>b.x>0 && b.x<4000 && b.y>0 && b.y<1000);
+
+ // Enemy bullets collision with player
+ for(let b of enemyBullets){
+   if(hit(player,b) && inv<=0){
+     player.hp--;
+     inv=60;
+     b.x=9999; // Remove bullet
+   }
+ }
+
+ // Camera coordinates update only when player position changes
+if (player.prevX !== player.x || player.prevY !== player.y) {
+  camX = player.x - c.width / 2;
+  camY = player.y - c.height / 2;
+  player.prevX = player.x;
+  player.prevY = player.y;
+}
+
+if(room.elevatorMove){
+  let elev = room.elevatorMove;
+
+  onElev =
+    player.x < elev.x + elev.w &&
+    player.x + player.w > elev.x &&
+    player.y + player.h >= elev.y - 15 &&
+    player.y + player.h <= elev.y + 15;
+}
+
+let maxY = Math.max(...room.platforms.map(p=>p.y));
+
+if(player.y > maxY + 50 && !onElev){
+  player.hp--;
+  player.x = player.spawnX;
+  player.y = player.spawnY;
+  player.vx = 0;
+  player.vy = 0;
+  inv = 60;
+  
+  // エレベーターも再配置
+  if(room.elevatorMove){
+    let elev = room.elevatorMove;
+    elev.offset = 0;
+    elev.y = elev.baseY;
+    
+    // 足場も元の位置に戻す
+    if(room.platforms && room.platforms.length > 0){
+      room.platforms[room.platforms.length - 1].y = elev.baseY;
+    }
+  }
+}
+
+ if(player.hp<=0){player.hp=5; player.x=player.spawnX; player.y=player.spawnY; player.vx=0; player.vy=0;}
+ if(player.x>3950){wx=Math.min(size-1,wx+1);player.x=50;}
+} // Added closing brace here
+
+// ===== DRAW ENEMIES =====
+// HPバー描画関数
+function drawHpBar(e, color = "red", maxHp = 2) {
+  ctx.fillStyle = "black";
+  ctx.fillRect(e.x, e.y - 5, e.w, 4);
+  ctx.fillStyle = color;
+  ctx.fillRect(e.x, e.y - 5, e.w * (e.hp / maxHp), 4);
+}
+
+function drawEnemies(){
+  if(state!=="game") return;
+  let roomType = world[wy][wx].type;
+  let er = enemies[roomType];
+  if(!er) return;
+
+  // ===== 雷描画 =====
+  for(let t of thunders){
+    if(t.timer > 30){
+      ctx.strokeStyle = "red";
+      ctx.beginPath();
+      ctx.moveTo(t.x, 0);
+      ctx.lineTo(t.x, 600);
+      ctx.stroke();
+    } else {
+      ctx.strokeStyle = "cyan";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      let y = 0;
+      ctx.moveTo(t.x, y);
+      while(y < 600){
+        let nx = t.x + (Math.random()*30-15);
+        let ny = y + 40;
+        ctx.lineTo(nx, ny);
+        y = ny;
+      }
+      ctx.stroke();
+      ctx.lineWidth = 1;
+    }
+  }
+
+  // 敵のデザイン
+  for(let e of er){
+    // ★ 地上では地下の敵描画しない
+    if(roomType === "jungle" && player.y <= 600){
+      if(e.y > 600) continue;
+    }
+    if(e.type==="normal"||e.type==="hoverCrab"){
+      ctx.fillStyle="red";
+      ctx.beginPath();
+      let w = e.w, h = e.h;
+      ctx.ellipse(e.x+w/2, e.y+h/2, w/2, h/2, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillRect(e.x-5, e.y+h/4, 10, 3);
+      ctx.fillRect(e.x+w-5, e.y+h/4, 10, 3);
+      for(let i=0;i<4;i++){
+        ctx.fillRect(e.x+i*5, e.y+h-2, 4, 2);
+        ctx.fillRect(e.x+w-4-i*5, e.y+h-2, 4, 2);
+      }
+      drawHpBar(e, "lime", 2);
+    }
+    else if(e.type==="fly"||e.type==="crazyFly"||e.type==="crazyFly2"){
+      ctx.fillStyle="cyan";
+      ctx.beginPath();
+      let cx = e.x + e.w/2;
+      let cy = e.y + e.h/2;
+      let r = e.w * 1.5;
+      for(let i=0;i<10;i++){
+        let a = i * 2*Math.PI/10;
+        let radius = (i%2===0)? r : r*0.6;
+        ctx.lineTo(cx + Math.cos(a)*radius, cy + Math.sin(a)*radius);
+      }
+      ctx.closePath();
+      ctx.fill();
+      drawHpBar(e, "orange", 2);
+    }
+    else if(roomType==="factory"){
+      ctx.save();
+      ctx.translate(e.x+e.w/2,e.y+e.h/2);
+      e.angle=(e.angle||0)+0.02;
+      ctx.rotate(e.angle);
+      ctx.fillStyle="cyan";
+      ctx.beginPath();
+      for(let i=0;i<5;i++){let a=i*2*Math.PI/5; ctx.lineTo(Math.cos(a)*40,Math.sin(a)*40);}
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle="magenta"; ctx.fillRect(-20,-20,40,40);
+      ctx.fillStyle="red"; ctx.fillRect(-20,-50,40*(e.hp/2),5);
+      ctx.restore();
+    }
+    else if(roomType==="jungle"){
+      ctx.fillStyle="lime";
+      ctx.beginPath();
+      ctx.arc(e.x+e.w/2, e.y+e.h/2, e.w/2, 0, Math.PI*2);
+      ctx.fill();
+      drawHpBar(e, "red", 2);
+    }
+    else if(roomType==="sky"){
+      ctx.fillStyle="white";
+      ctx.beginPath();
+      ctx.moveTo(e.x+e.w/2, e.y);
+      ctx.lineTo(e.x+e.w, e.y+e.h/2);
+      ctx.lineTo(e.x+e.w/2, e.y+e.h);
+      ctx.lineTo(e.x, e.y+e.h/2);
+      ctx.closePath();
+      ctx.fill();
+      drawHpBar(e, "red", 2);
+    }
+    else {
+      ctx.fillStyle="red";
+      ctx.fillRect(e.x,e.y,e.w,e.h);
+      drawHpBar(e, "red", 2);
+    }
+  }
+}
+
+// ===== DRAW =====
+
+
+
+
+function drawMini(){let s=10;for(let y=0;y<size;y++){for(let x=0;x<size;x++){ctx.fillStyle=(x===wx&&y===wy)?"yellow":"gray";ctx.fillRect(10+x*s,60+y*s,s-2,s-2);}}}
+function draw(){
+
+
+
+
+ ctx.clearRect(0,0,c.width,c.height);
+
+//-------------------Scene---------2026/4/1/22:16
+ if(state==="title"){ctx.fillStyle="black";ctx.fillRect(0,0,c.width,c.height); ctx.fillStyle="white";ctx.font="40px sans-serif";
+ ctx.fillText("METROID",c.width/2-100,c.height/2-20);ctx.font="20px sans-serif";
+ ctx.fillText("Press Z to Start",c.width/2-90,c.height/2+30); 
+
+  if(hasSave){
+    ctx.fillStyle="yellow";
+    ctx.fillText("Press 2 to Load", c.width/2-90, c.height/2+60);
+  }
+   return;
+   
+ }
+//Load-----------------------------
+
+ if(state==="loading"){ctx.fillStyle="black";ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle="white";ctx.font="30px sans-serif";ctx.fillText("Loading...",c.width/2-50,c.height/2); 
+ ctx.fillStyle="lime";
+  ctx.font="20px monospace";
+
+  let t = Math.floor(Date.now()/200)%4;
+
+  let lines = [
+    ">> world data initializing",
+    ">> terrain building",
+    ">> enemy placement",
+    ">> system check"
+  ];
+
+  // 進行っぽく1行ずつ表示
+  for(let i=0;i<lines.length;i++){
+    if(i <= t){
+      ctx.fillText(lines[i], c.width/2-150, c.height/2 + i*30);
+    }
+  }
+
+  // 点滅カーソル
+  if(Math.floor(Date.now()/300)%2===0){
+    ctx.fillText("_", c.width/2+150, c.height/2 + t*30);
+  }
+
+  return;
+}
+
+let cell = world[wy][wx];
+if(!cell) return;
+
+let room = cell.base;
+let stateData = cell.state;
+let roomType = cell.type;
+
+ ctx.save(); ctx.translate(-camX,-camY);
+ ctx.fillStyle=room.color; ctx.fillRect(camX,camY,c.width,c.height);
+
+ if(room.lava){ctx.fillStyle="orange";ctx.fillRect(room.lava.x,room.lava.y,room.lava.w,room.lava.h);}
+ 
+ if(room.elevatorUp){
+  ctx.fillStyle="silver";
+  ctx.fillRect(room.elevatorUp.x, room.elevatorUp.y, room.elevatorUp.w, room.elevatorUp.h);
+  ctx.fillStyle="black";
+  ctx.font="16px sans-serif";
+  ctx.fillText("UP", room.elevatorUp.x + 18, room.elevatorUp.y + 50);
+ }
+
+ if(room.elevatorDown){
+  ctx.fillStyle="silver";
+  ctx.fillRect(room.elevatorDown.x, room.elevatorDown.y, room.elevatorDown.w, room.elevatorDown.h);
+  ctx.fillStyle="black";
+  ctx.font="16px sans-serif";
+  ctx.fillText("DOWN", room.elevatorDown.x + 18, room.elevatorDown.y + 50);
+ }
+
+ if(room.elevatorMove){
+  ctx.fillStyle="silver";
+  ctx.fillRect(room.elevatorMove.x, room.elevatorMove.y, room.elevatorMove.w, room.elevatorMove.h);
+  ctx.fillStyle="black";
+  ctx.font="16px sans-serif";
+  ctx.fillText("ELEV", room.elevatorMove.x + 18, room.elevatorMove.y + 50);
+ }
+
+//2026/4/1/21:27-----------------------23:59
+
+//save Of Drawing things--------
+
+// ===== ジャングル地下エリアのオブラートカーテン =====
+if(roomType === "jungle" && player.y <= 600){
+  // オブラートの描画（地上から地下を隠す）
+  ctx.fillStyle = "rgba(20, 20, 30, 0.9)";
+  ctx.fillRect(0, 600, 4000, 500);
+  
+  // オブラートのテクスチャ効果
+  ctx.fillStyle = "rgba(10, 10, 20, 0.5)";
+  for(let i = 0; i < 30; i++){
+    let rx = Math.random() * 4000;
+    let ry = 600 + Math.random() * 500;
+    ctx.fillRect(rx, ry, 8, 8);
+  }
+  
+  // オブラートの波線効果
+  ctx.strokeStyle = "rgba(30, 30, 40, 0.7)";
+  ctx.lineWidth = 2;
+  for(let i = 0; i < 10; i++){
+    ctx.beginPath();
+    let y = 620 + i * 40;
+    ctx.moveTo(0, y);
+    for(let x = 0; x <= 4000; x += 50){
+      ctx.lineTo(x, y + Math.sin(x / 100) * 10);
+    }
+    ctx.stroke();
+  }
+  ctx.lineWidth = 1;
+}
+
+if(room.savePoint){
+  ctx.fillStyle="cyan";
+  ctx.fillRect(room.savePoint.x,room.savePoint.y,40,40);
+// プレイヤー近くなら表示
+  if(Math.abs(player.x - room.savePoint.x) < 100 &&
+     Math.abs(player.y - room.savePoint.y) < 100){
+
+    ctx.fillStyle="white";
+    ctx.font="14px sans-serif";
+    ctx.fillText("Press 1 to SAVE", room.savePoint.x - 20, room.savePoint.y - 10);
+  }
+}
+
+if(room.morphBall && !stateData.morphTaken){
+  ctx.fillStyle="orange";
+  let it = room.morphBall;
+  ctx.fillRect(it.x, it.y, it.w, it.h);
+  ctx.fillStyle="white";
+  ctx.font="14px sans-serif";
+  ctx.fillText(it.name, it.x - 10, it.y - 10);
+}
+
+if(room.pits){
+ for(let pit of room.pits){
+  ctx.globalAlpha = 1; // ←透明
+  ctx.fillStyle="black";
+  ctx.fillRect(pit.x,pit.y,pit.w,pit.h);
+  ctx.globalAlpha = 1;
+ }
+}
+
+ if(room.electric){ctx.fillStyle="cyan";ctx.fillRect(room.electric.x,room.electric.y,room.electric.w,room.electric.h);}
+ if(room.hidden){ctx.fillStyle="rgba(40,255,19,0.1)";ctx.fillRect(room.hidden.x,room.hidden.y,room.hidden.w,room.hidden.h);}
+ if(room.secretPass){ctx.fillStyle="rgba(255,10,255,0.9)";ctx.fillRect(room.secretPass.x,room.secretPass.y,room.secretPass.w,room.secretPass.h);}
+ if(room.warp){ctx.fillStyle="rgba(0,255,255,0.1)";ctx.fillRect(room.warp.x,room.warp.y,room.warp.w,room.warp.h);}
+ if(room.warpToMorph){ctx.fillStyle="magenta";ctx.fillRect(room.warpToMorph.x,room.warpToMorph.y,room.warpToMorph.w,room.warpToMorph.h);}
+
+// tower→sky
+if(room.warpSky){
+ ctx.fillStyle=room.warpSky.color;
+ ctx.globalAlpha=0.3;
+ ctx.fillRect(room.warpSky.x,room.warpSky.y,room.warpSky.w,room.warpSky.h);
+ ctx.globalAlpha=1;
+}
+
+// sky→tower
+if(room.warpTower){
+ ctx.fillStyle=room.warpTower.color;
+ ctx.globalAlpha=0.3;
+ ctx.fillRect(room.warpTower.x,room.warpTower.y,room.warpTower.w,room.warpTower.h);
+ ctx.globalAlpha=1;
+}
+
+// ===== ジャングル地下エリアの透過処理 =====
+/*
+let undergroundAlpha = 1.0;
+ if(roomType === "jungle"){
+   if(player.y > 600){
+    // 地下エリアではプレイヤー周辺のみ透過
+    undergroundAlpha = 0.0; // デフォルトは完全に透明
+    
+    // プレイヤー周辺のエリアだけ表示
+    let revealRadius = 150;
+       for(let checkX = player.x - revealRadius; checkX <= player.x + revealRadius; checkX += 30){
+
+          for(let checkY = player.y - revealRadius; checkY <= player.y + revealRadius; checkY += 30){
+
+             let distance = Math.sqrt(Math.pow(player.x - checkX, 2) + Math.pow(player.y - checkY, 2));
+               if(distance < revealRadius){
+                 let localAlpha = Math.max(0, Math.min(1.0, (revealRadius - distance) / revealRadius));
+                 undergroundAlpha = Math.max(undergroundAlpha, localAlpha);
+          }
+      }
+    }
+  } else {
+    // 地上でも地下の岩ブロックを隠す
+    undergroundAlpha = 0.0;
+  }
+}*/
+
+ ctx.fillStyle="green";
+for(let p of room.platforms){
+
+  // ★ 地上にいるときは地下を描画しない
+  if(roomType === "jungle" && player.y <= 600){
+    if(p.y > 600) continue; // 地下の足場はスキップ
+  }
+
+  ctx.fillRect(p.x,p.y,p.w,p.h);
+}
+ if(room.walls){
+  ctx.fillStyle="gray";
+  for(let w of room.walls){
+
+    if(roomType === "jungle" && player.y <= 600){
+      if(w.y > 600) continue;
+    }
+
+    ctx.fillRect(w.x,w.y,w.w,w.h);
+  }
+}
+
+// ===== マリオの緑の装飾 =====
+if(world[wy][wx].type==="jungle" && player.y <= 600){
+  for(let i=100;i<2000;i+=200){
+    {ctx.fillStyle="#072";ctx.fillRect(i,480,20,70);ctx.fillStyle="green";ctx.beginPath();ctx.moveTo(i-20,480);ctx.lineTo(i+10,430);ctx.lineTo(i+40,480);ctx.fill();}
+  }
+}
+
+if(boss){
+  ctx.fillStyle="purple";
+  ctx.fillRect(boss.x,boss.y,boss.w,boss.h);
+
+  // HPバー
+  ctx.fillStyle="black";
+  ctx.fillRect(boss.x, boss.y-10, boss.w, 6);
+  ctx.fillStyle="red";
+  ctx.fillRect(boss.x, boss.y-10, boss.w*(boss.hp/50), 6);
+}
+
+ // ===== 敵とオブジェクトの透過描画 =====
+ ctx.save();
+ if(roomType === "jungle" && player.y > 600){
+   //ctx.globalAlpha = undergroundAlpha;
+ }
+ drawEnemies();
+ ctx.restore();
+
+ if(inv%10<5){
+    ctx.fillStyle="white";
+    if(player.morphBall){
+      ctx.beginPath();
+      ctx.arc(player.x+player.w/2, player.y+player.h/2, player.w/2, 0, Math.PI*2);
+      ctx.fill();
+    } else {
+      ctx.fillRect(player.x,player.y,player.w,player.h);
+    }
+ }
+ ctx.fillStyle="yellow"; for(let b of bullets)ctx.fillRect(b.x,b.y,b.w,b.h);
+ ctx.fillStyle="red"; 
+for(let b of enemyBullets){
+  ctx.save();
+  ctx.translate(b.x + b.w/2, b.y + b.h/2);
+  let angle = Math.atan2(b.vy, b.vx);
+  ctx.rotate(angle);
+  ctx.fillRect(-b.w/2, -b.h/2, b.w, b.h);
+  ctx.restore();
+}
+
+ ctx.restore();
+ ctx.fillStyle="white"; ctx.font="16px sans-serif";ctx.fillText("HP:" + player.hp,20,20);
+ if(saveTimer > 0 && saveMessage){
+   ctx.fillStyle="yellow";
+   ctx.font="18px sans-serif";
+   ctx.fillText(saveMessage,20,70);
+ }
+
+
+ctx.fillText("ROOM:" + roomType,20,40);
+ drawMini();
+}
+
+// ===== INPUT =====
+addEventListener("keydown",e=>{
+  keys[e.key]=true;
+
+  if(state==="title" && e.key.toLowerCase()==="z"){
+    state="loading"; 
+    bgm.play().catch(() => {});
+
+    world = [];
+    for(let y=0;y<size;y++) world[y]=[];
+
+    genX = 0;
+    genY = 0;
+  }
+});
+
+addEventListener("keyup",e=>keys[e.key]=false);
+
+//Save and Load----------------------------
+addEventListener("keydown",e=>{
+  if(e.key==="1") saveGame();
+  if(e.key==="2" && state==="title") loadGame();
+});
+
+// ===== LOOP =====
+function loop(){update();draw();requestAnimationFrame(loop);}loop();
+</script>
+</body>
+</html>
