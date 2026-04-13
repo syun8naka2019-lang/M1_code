@@ -51,7 +51,7 @@ let rooms={//4/5
 
  jungle:{color:"#0b1f0b",platforms:[{x:0,y:550,w:4000,h:50},{x:200,y:450,w:200,h:20},{x:500,y:350,w:200,h:20},{x:900,y:480,w:200,h:20},{x:1300,y:400,w:200,h:20},{x:1700,y:300,w:120,h:120}],
  walls:[{x:0,y:0,w:20,h:600},{x:3980,y:0,w:20,h:600}],hidden:{x:1000,y:580,w:100,h:30},warp:{x:1750,y:260,w:60,h:60},secretPass:{x:1720,y:320,w:80,h:40},
-stone:{x:1800,y:490,w:40,h:60,text:"  0-8-",show:false}},
+ textBox:{x:350,y:380,w:120,h:60,text:"Welcome to Jungle Area!\n(WASD/Arrows: Move, Space: Jump, Mouse: Attack)",shown:false}},
 
  volcano:{color:"#2b0f0f",platforms:[
   {x:0,y:550,w:1900,h:50},     // 左床
@@ -1380,23 +1380,6 @@ if(room.morphBall && !stateData.morphTaken){
   ctx.fillStyle="white";
   ctx.font="14px sans-serif";
   ctx.fillText(it.name, it.x - 10, it.y - 10);
-}
-
-if(room.textBox){
-  let t = room.textBox;
-
-  if(Math.abs(player.x - t.x) < 150 && Math.abs(player.y - t.y) < 100){
-
-    ctx.fillStyle="rgba(0,0,0,0.7)";
-    ctx.fillRect(t.x, t.y, t.w, t.h);
-
-    ctx.strokeStyle="white";
-    ctx.strokeRect(t.x, t.y, t.w, t.h);
-
-    ctx.fillStyle="white";
-    ctx.font="14px sans-serif";
-    ctx.fillText(t.text, t.x+10, t.y+30);
-  }
 }
 
 if(room.pits){
