@@ -1,0 +1,25 @@
+# Git ignore file for Metroid game project
+
+# Ignore backup files with date patterns
+Metroidpro_code_2026*
+
+# Ignore temporary files
+*.tmp
+*.temp
+*.bak
+*~
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
+
+# Ignore IDE files
+.vscode/
+.idea/
+
+# Ignore log files
+*.log
+
+# Keep only main files
+!Metroidpro_code.html
+!title.wav

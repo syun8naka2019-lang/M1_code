@@ -1382,6 +1382,32 @@ if(room.morphBall && !stateData.morphTaken){
   ctx.fillText(it.name, it.x - 10, it.y - 10);
 }
 
+if(room.stone){
+  let s = room.stone;
+
+  // Stone monument body
+  ctx.fillStyle="gray";
+  ctx.fillRect(s.x, s.y, s.w, s.h);
+
+  // Pattern
+  ctx.fillStyle="darkgray";
+  ctx.fillRect(s.x+5, s.y+5, s.w-10, s.h-10);
+}
+
+if(room.stone && room.stone.show){
+  let s = room.stone;
+
+  ctx.fillStyle="rgba(0,0,0,0.8)";
+  ctx.fillRect(s.x-80, s.y-70, 200, 50);
+
+  ctx.strokeStyle="white";
+  ctx.strokeRect(s.x-80, s.y-70, 200, 50);
+
+  ctx.fillStyle="white";
+  ctx.font="14px sans-serif";
+  ctx.fillText(s.text, s.x-70, s.y-40);
+}
+
 if(room.textBox){
   let t = room.textBox;
 
