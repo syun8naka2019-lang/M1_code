@@ -1,0 +1,25 @@
+{
+  "name": "m1_code_security",
+  "version": "1.0.0",
+  "description": "Security Configuration for M1_code",
+  "main": "security-test.js",
+  "scripts": {
+    "start": "node security-test.js",
+    "dev": "node security-test.js",
+    "security:audit": "npm audit",
+    "security:fix": "npm audit fix",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "security",
+    "javascript",
+    "test"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^4.18.0",
+    "dotenv": "^16.3.0"
+  }
+}

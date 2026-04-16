@@ -1,0 +1,39 @@
+{
+  "name": "m1_code_security",
+  "version": "1.0.0",
+  "description": "Metroid Game Project with Security Configuration - ゲーム開発とセキュリティの統合",
+  "main": "Metroidpro_code.html",
+  "scripts": {
+    "start": "node security-test.js",
+    "dev": "node security-test.js",
+    "game": "npx live-server --port=8080 --open=Metroidpro_code.html",
+    "game:secure": "npx live-server --port=8080 --open=Metroidpro_code.html --cors",
+    "game:test": "npx live-server --port=8081 --open=test-security.html",
+    "security:test": "npx live-server --port=8081 --open=test-security.html",
+    "security:audit": "npm audit",
+    "security:fix": "npm audit fix",
+    "security:full": "npm run security:audit && npm run security:test",
+    "dev:full": "npm run security:test && npm run game",
+    "build": "echo 'Building for production...' && npm run security:audit",
+    "build:secure": "npm run security:full && npm run build",
+    "test": "echo 'Run npm run security:test for security testing' && exit 0"
+  },
+  "keywords": [
+    "security",
+    "javascript",
+    "test",
+    "game",
+    "metroid",
+    "development"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^4.18.0",
+    "dotenv": "^16.3.0"
+  },
+  "devDependencies": {
+    "live-server": "^1.2.2"
+  }
+}

@@ -12,7 +12,7 @@ let c=document.getElementById("c"),ctx=c.getContext("2d");
 function resize(){c.width=innerWidth;c.height=innerHeight;}onresize=resize;resize();
 
 // ===== STATE =====
-let state="title";
+let gameState="title";
 let loadTimer=120;
 let saveEnabled = true;
 let hasSave = false;
@@ -51,7 +51,7 @@ let rooms={//4/5
 
  jungle:{color:"#0b1f0b",platforms:[{x:0,y:550,w:4000,h:50},{x:200,y:450,w:200,h:20},{x:500,y:350,w:200,h:20},{x:900,y:480,w:200,h:20},{x:1300,y:400,w:200,h:20},{x:1700,y:300,w:120,h:120}],
  walls:[{x:0,y:0,w:20,h:600},{x:3980,y:0,w:20,h:600}],hidden:{x:1000,y:580,w:100,h:30},warp:{x:1750,y:260,w:60,h:60},secretPass:{x:1720,y:320,w:80,h:40},
-stone:{x:1800,y:490,w:40,h:60,text:"  0-8-",show:false}},
+ stones:[{x:1800,y:490,w:40,h:60,text:"エレベーターはWで上昇\nSで下降\n思い切って下降すると\n地下火山エリアが？？",show:false},{x:3500,y:490,w:40,h:60,text:"x座標3500",show:false},{x:3500,y:710,w:40,h:60,text:"ここは惑星フォーミュラ、地球にうり二つの惑星だ。バイク乗りの多目より",show:false}]},
 
  volcano:{color:"#2b0f0f",platforms:[
   {x:0,y:550,w:1900,h:50},     // 左床
@@ -75,9 +75,8 @@ lava:{x:0,y:580,w:4000,h:50},
 warpTower:{x:1400,y:500,w:80,h:80,color:"purple"}},
 
  secret:{color:"#222244",platforms:[{x:0,y:550,w:4000,h:50},{x:500,y:450,w:200,h:20}],
- hidden:
-    {x:800,y:500,w:100,h:30}, // 既存のhidden
-    walls: [
+ hidden:{x:800,y:500,w:100,h:30},
+ walls:[
     // ===== 立方体ブロック（上下左右進行不可） =====
     {x:1200,y:450,w:60,h:60}, // 立方体1
     {x:1300,y:400,w:60,h:60}, // 立方体2
@@ -470,7 +469,7 @@ function loadGame(){
     Object.assign(player, d.player);
     world = JSON.parse(JSON.stringify(d.world));
 
-    state = "game";
+    gameState = "game";
     camX = player.x - c.width / 2;
     camY = player.y - c.height / 2;
     player.prevX = player.x;
@@ -484,7 +483,7 @@ function loadGame(){
 function update(){
 
   // ▼ loading専用処理
-  if(state==="loading"){
+  if(gameState==="loading"){
 
     for(let i=0;i<2;i++){
 
@@ -493,22 +492,22 @@ function update(){
         let type = types[(genX+genY)%types.length];
         let base = JSON.parse(JSON.stringify(rooms[type]));
         let roomType = type;
-        let state = { doubleJumpTaken:false };
+        let roomState = { doubleJumpTaken:false };
 
         if(genX === 0 && genY === size - 1){
           roomType = "morph";
           base = JSON.parse(JSON.stringify(rooms.morph));
-          state = { doubleJumpTaken:false, morphTaken:false, enteredFromRight:false };
+          roomState = { doubleJumpTaken:false, morphTaken:false, enteredFromRight:false };
         } else if(genX === size - 1 && genY === 0){
           roomType = "morphAlt";
           base = JSON.parse(JSON.stringify(rooms.morphAlt));
-          state = { doubleJumpTaken:false };
+          roomState = { doubleJumpTaken:false };
         }
 
         world[genY][genX] = {
           type: roomType,
           base: base,
-          state: state
+          state: roomState
         };
 
         if(genX === 1 && genY === 4){
@@ -525,7 +524,7 @@ function update(){
         loadStep = Math.floor((genY*size+genX)/(size*size)*4);
 
       }else{
-        state="game";
+        gameState="game";
         break;
       }
 
@@ -534,7 +533,7 @@ function update(){
     return;
   }
 
-  if(state !== "game"){
+  if(gameState !== "game"){
     return;
   }
 
@@ -767,7 +766,7 @@ if(room.pits){
 }
 
 // ===== 雷生成（テスト用：一定時間ごと）=====
-if(state==="game" && roomType==="factory" && Math.random() < 0.008){
+if(gameState==="game" && roomType==="factory" && Math.random() < 0.008){
   thunders.push({
     x: player.x + (Math.random()*200-100),
     y: 0,
@@ -865,7 +864,7 @@ if(e.originX === undefined){
    }
 
 else if(e.type==="hoverCrab"){
-  // 毎フレ更新（←あえてやる）
+  // 毎フレーム更新（←あえてやる）
   e.originX = e.x;
   e.originY = e.y;
 
@@ -1132,7 +1131,7 @@ function drawHpBar(e, color = "red", maxHp = 2) {
 }
 
 function drawEnemies(){
-  if(state!=="game") return;
+  if(gameState!=="game") return;
   let roomType = world[wy][wx].type;
   let er = enemies[roomType];
   if(!er) return;
@@ -1250,8 +1249,8 @@ function draw(){
  ctx.clearRect(0,0,c.width,c.height);
 
 //-------------------Scene---------2026/4/1/22:16
- if(state==="title"){ctx.fillStyle="black";ctx.fillRect(0,0,c.width,c.height); ctx.fillStyle="white";ctx.font="40px sans-serif";
- ctx.fillText("METROID",c.width/2-100,c.height/2-20);ctx.font="20px sans-serif";
+ if(gameState==="title"){ctx.fillStyle="black";ctx.fillRect(0,0,c.width,c.height); ctx.fillStyle="white";ctx.font="40px sans-serif";
+ ctx.fillText("Dream Come True",c.width/2-100,c.height/2-20);ctx.font="20px sans-serif";
  ctx.fillText("Press Z to Start",c.width/2-90,c.height/2+30); 
 
   if(hasSave){
@@ -1263,7 +1262,7 @@ function draw(){
  }
 //Load-----------------------------
 
- if(state==="loading"){ctx.fillStyle="black";ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle="white";ctx.font="30px sans-serif";ctx.fillText("Loading...",c.width/2-50,c.height/2); 
+ if(gameState==="loading"){ctx.fillStyle="black";ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle="white";ctx.font="30px sans-serif";ctx.fillText("Loading...",c.width/2-50,c.height/2); 
  ctx.fillStyle="lime";
   ctx.font="20px monospace";
 
@@ -1382,52 +1381,48 @@ if(room.morphBall && !stateData.morphTaken){
   ctx.fillText(it.name, it.x - 10, it.y - 10);
 }
 
-if(room.stone){
-  let s = room.stone;
+// 石碑表示管理（グローバル変数)
+if(typeof stoneVisible === 'undefined') stoneVisible = {};
+if(typeof stoneClosed === 'undefined') stoneClosed = {};
+if(room.stones){
+  for(let s of room.stones){
+    let stoneId = wx + ',' + wy + ',' + s.x + ',' + s.y;
 
-  // Stone monument body
-  ctx.fillStyle="gray";
-  ctx.fillRect(s.x, s.y, s.w, s.h);
+    // Stone monument body
+    ctx.fillStyle="gray";
+    ctx.fillRect(s.x, s.y, s.w, s.h);
 
-  // Pattern
-  ctx.fillStyle="darkgray";
-  ctx.fillRect(s.x+5, s.y+5, s.w-10, s.h-10);
-}
-
-if(room.stone && room.stone.show){
-  let s = room.stone;
-
-    ctx.fillStyle="rgba(0,0,0,0.8)";
-    ctx.fillRect(s.x-80, s.y-70, 200, 50);
-
-    ctx.strokeStyle="white";
-    ctx.strokeRect(s.x-80, s.y-70, 200, 50);
-
-    ctx.fillStyle="white";
-    ctx.font="14px sans-serif";
-    ctx.fillText(s.text, s.x-70, s.y-40);
-}
-
-if(room.textBox){
-  let t = room.textBox;
-
-  if(Math.abs(player.x - t.x) < 150 && Math.abs(player.y - t.y) < 100){
-
-    ctx.fillStyle="rgba(0,0,0,0.7)";
-    ctx.fillRect(t.x, t.y, t.w, t.h);
-
-    ctx.strokeStyle="white";
-    ctx.strokeRect(t.x, t.y, t.w, t.h);
-
-    ctx.fillStyle="white";
-    ctx.font="14px sans-serif";
-    ctx.fillText(t.text, t.x+10, t.y+30);
+    // Pattern
+    ctx.fillStyle="darkgray";
+    ctx.fillRect(s.x+5, s.y+5, s.w-10, s.h-10);
+    
+    // プレイヤーとの距離計算
+    let distX = Math.abs(player.x - s.x);
+    let distY = Math.abs(player.y - s.y);
+    let isNear = distX < 150 && distY < 150;
+    
+    // 近くに来たら自動表示（まだ閉じていない場合）
+    if(isNear && !stoneClosed[stoneId]){
+      stoneVisible[stoneId] = true;
+    }
+    
+    // 離れたらリセット（次回また自動表示されるように）
+    if(!isNear){
+      stoneVisible[stoneId] = false;
+      stoneClosed[stoneId] = false;
+    }
+    
+    // Xキーで閉じる
+    if(keys["x"] && stoneVisible[stoneId]){
+      stoneVisible[stoneId] = false;
+      stoneClosed[stoneId] = true;
+    }
   }
 }
 
 if(room.pits){
  for(let pit of room.pits){
-  ctx.globalAlpha = 1; // ←透明
+  ctx.globalAlpha = 1;
   ctx.fillStyle="black";
   ctx.fillRect(pit.x,pit.y,pit.w,pit.h);
   ctx.globalAlpha = 1;
@@ -1552,16 +1547,50 @@ for(let b of enemyBullets){
   ctx.restore();
 }
 
+// ===== 石碑テキストを最前面に表示（カメラ変換内） =====
+ctx.globalAlpha = 1;
+if(room.stones){
+  for(let s of room.stones){
+    let stoneId = wx + ',' + wy + ',' + s.x + ',' + s.y;
+    if(stoneVisible[stoneId]){
+      let lines = s.text.split('\n');
+      let textHeight = lines.length * 14;
+      let boxW = s.boxW || Math.max(200, Math.max(...lines.map(l => l.length)) * 14 + 40);
+      let boxH = s.boxH || (textHeight + 20);
+      let boxX = s.boxX !== undefined ? s.boxX : s.x - boxW / 2 + s.w / 2;
+      let boxY = s.boxY !== undefined ? s.boxY : s.y - 70 - textHeight / 2;
+      
+      ctx.fillStyle="rgba(0,0,0,0.9)";
+      ctx.fillRect(boxX, boxY, boxW, boxH);
+
+      ctx.strokeStyle="white";
+      ctx.lineWidth=2;
+      ctx.strokeRect(boxX, boxY, boxW, boxH);
+      ctx.lineWidth=1;
+
+      ctx.fillStyle="white";
+      ctx.font="14px sans-serif";
+      let textX = s.textX !== undefined ? s.textX : boxX + 10;
+      let startY = s.startY !== undefined ? s.startY : boxY + 20;
+      for(let i = 0; i < lines.length; i++){
+        ctx.fillText(lines[i], textX, startY + i * 14);
+      }
+      
+      ctx.fillStyle="yellow";
+      ctx.font="12px sans-serif";
+      ctx.fillText("Xキーで閉じる", boxX, boxY - 5);
+    }
+  }
+}
+
  ctx.restore();
  ctx.fillStyle="white"; ctx.font="16px sans-serif";ctx.fillText("HP:" + player.hp,20,20);
  if(saveTimer > 0 && saveMessage){
    ctx.fillStyle="yellow";
-   ctx.font="18px sans-serif";
    ctx.fillText(saveMessage,20,70);
  }
 
-
-ctx.fillText("ROOM:" + roomType,20,40);
+//ctx.fillText("ROOM:" + roomType,20,40);
  drawMini();
 }
 
@@ -1569,8 +1598,8 @@ ctx.fillText("ROOM:" + roomType,20,40);
 addEventListener("keydown",e=>{
   keys[e.key]=true;
 
-  if(state==="title" && e.key.toLowerCase()==="z"){
-    state="loading"; 
+  if(gameState==="title" && e.key.toLowerCase()==="z"){
+    gameState="loading"; 
     bgm.play().catch(() => {});
 
     world = [];
@@ -1586,7 +1615,7 @@ addEventListener("keyup",e=>keys[e.key]=false);
 //Save and Load----------------------------
 addEventListener("keydown",e=>{
   if(e.key==="1") saveGame();
-  if(e.key==="2" && state==="title") loadGame();
+  if(e.key==="2" && gameState==="title") loadGame();
 });
 
 // ===== LOOP =====

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure JavaScript Project - CSP Example</title>
+    
+    <!-- Content Security Policy Header -->
+    <meta http-equiv="Content-Security-Policy" 
+          content="default-src 'self'; 
+                   script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; 
+                   style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; 
+                   font-src 'self' https://fonts.gstatic.com; 
+                   img-src 'self' data: https:; 
+                   connect-src 'self' https://api.example.com; 
+                   frame-src 'none'; 
+                   object-src 'none'; 
+                   base-uri 'self'; 
+                   form-action 'self'; 
+                   upgrade-insecure-requests;">
+    
+    <!-- Additional Security Headers -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    <meta http-equiv="X-XSS-Protection" content="1; mode=block">
+    <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
+    
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .security-info {
+            background: #e8f5e8;
+            border-left: 4px solid #28a745;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .warning {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        code {
+            background: #f8f9fa;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>JavaScript Security Configuration Example</h1>
+        
+        <div class="security-info">
+            <h2>Content Security Policy (CSP) Configuration</h2>
+            <p>This page demonstrates secure CSP headers for JavaScript applications.</p>
+            <pre><code>&lt;meta http-equiv="Content-Security-Policy" 
+      content="default-src 'self'; 
+               script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; 
+               style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; 
+               font-src 'self' https://fonts.gstatic.com; 
+               img-src 'self' data: https:; 
+               connect-src 'self' https://api.example.com; 
+               frame-src 'none'; 
+               object-src 'none'; 
+               base-uri 'self'; 
+               form-action 'self'; 
+               upgrade-insecure-requests;"&gt;</code></pre>
+        </div>
+
+        <div class="warning">
+            <h3>Security Features Enabled:</h3>
+            <ul>
+                <li><strong>X-Content-Type-Options: nosniff</strong> - Prevents MIME-type sniffing</li>
+                <li><strong>X-Frame-Options: DENY</strong> - Prevents clickjacking attacks</li>
+                <li><strong>X-XSS-Protection: 1; mode=block</strong> - Enables XSS protection</li>
+                <li><strong>Referrer-Policy: strict-origin-when-cross-origin</strong> - Controls referrer information</li>
+            </ul>
+        </div>
+
+        <h2>Secure JavaScript Practices</h2>
+        <div id="secure-demo">
+            <p>This section demonstrates secure JavaScript coding practices.</p>
+            <button onclick="secureFunction()">Test Secure Function</button>
+            <div id="result"></div>
+        </div>
+
+        <h2>Environment Variable Usage</h2>
+        <p>API endpoints and sensitive data should be loaded from environment variables:</p>
+        <pre><code>// Secure API call example
+const API_URL = process.env.API_URL || 'https://api.example.com';
+const API_KEY = process.env.API_KEY;
+
+async function secureApiCall() {
+    try {
+        const response = await fetch(`${API_URL}/data`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${API_KEY}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('API call failed:', error);
+        throw error;
+    }
+}</code></pre>
+    </div>
+
+    <script>
+        // Secure JavaScript example
+        function secureFunction() {
+            const resultDiv = document.getElementById('result');
+            
+            // Use textContent instead of innerHTML to prevent XSS
+            resultDiv.textContent = 'Secure function executed successfully!';
+            
+            // Validate input before processing
+            const userInput = prompt('Enter some text:');
+            if (userInput && userInput.length > 0 && userInput.length < 100) {
+                // Sanitize input
+                const sanitized = userInput.replace(/[<>]/g, '');
+                resultDiv.textContent = `Processed: ${sanitized}`;
+            } else {
+                resultDiv.textContent = 'Invalid input detected!';
+            }
+        }
+
+        // Development vs Production check
+        if (process.env.NODE_ENV === 'production') {
+            console.log('Production mode - debug features disabled');
+        } else {
+            console.log('Development mode - debug features enabled');
+        }
+    </script>
+</body>
+</html>

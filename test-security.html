@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JavaScript Security Test - ゲーム開発用</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .safe {
+            border-left: 4px solid #4CAF50;
+        }
+        .unsafe {
+            border-left: 4px solid #f44336;
+        }
+        .result {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        input, button {
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .code {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            margin: 10px 0;
+        }
+        .game-link {
+            display: inline-block;
+            background-color: #28a745;
+            color: white;
+            padding: 15px 30px;
+            text-decoration: none;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        .game-link:hover {
+            background-color: #218838;
+        }
+    </style>
+</head>
+<body>
+    <h1>JavaScript Security Test - ゲーム開発用</h1>
+    
+    <div class="test-section">
+        <h2>🎮 ゲーム開発とセキュリティの統合</h2>
+        <p>このページでは、ゲーム開発時のセキュリティチェックを行います。</p>
+        <a href="Metroidpro_code.html" class="game-link">メトロイドゲームをプレイ</a>
+    </div>
+    
+    <div class="test-section">
+        <h2>1. 入力検証テスト</h2>
+        <p>ゲーム内でユーザー入力を処理する場合のテスト：</p>
+        <input type="text" id="userInput" placeholder="テキストを入力 (&lt;script&gt;alert('xss')&lt;/script&gt;を試す)">
+        <button onclick="testInputValidation()">テスト実行</button>
+        <div id="validationResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. XSS 防止テスト</h2>
+        <p>XSS攻撃からゲームを守る方法：</p>
+        <input type="text" id="xssInput" placeholder="HTMLを入力 (&lt;img src=x onerror=alert(1)&gt;を試す)">
+        <button onclick="testXSSPrevention()">テスト実行</button>
+        <div id="xssResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>3. 環境変数チェック</h2>
+        <p>ゲーム設定のセキュリティ確認：</p>
+        <button onclick="checkEnvironment()">環境確認</button>
+        <div id="envResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>4. セキュリティヘッダーチェック</h2>
+        <p>ゲームサーバーのセキュリティヘッダー：</p>
+        <button onclick="checkSecurityHeaders()">ヘッダー確認</button>
+        <div id="headersResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>📋 セキュリティチェックリスト</h2>
+        <ul>
+            <li>✅ innerHTML を使わず textContent を使用</li>
+            <li>✅ ユーザー入力は必ず検証</li>
+            <li>✅ 環境変数は .env ファイルで管理</li>
+            <li>✅ セキュリティヘッダーを設定</li>
+            <li>✅ npm audit で脆弱性チェック</li>
+        </ul>
+    </div>
+
+    <script>
+        // 入力検証関数
+        function validateInput(input) {
+            if (!input || typeof input !== 'string') {
+                throw new Error('無効な入力');
+            }
+            
+            if (input.length > 1000) {
+                throw new Error('入力が長すぎる');
+            }
+            
+            // 入力のサニタイズ
+            return input.replace(/[<>]/g, '');
+        }
+
+        function testInputValidation() {
+            const input = document.getElementById('userInput').value;
+            const resultDiv = document.getElementById('validationResult');
+            
+            try {
+                const sanitized = validateInput(input);
+                // 安全な方法: createElement を使用
+                resultDiv.innerHTML = '';
+                const div = document.createElement('div');
+                div.className = 'result success';
+                
+                const h3 = document.createElement('h3');
+                h3.textContent = '検証成功！';
+                div.appendChild(h3);
+                
+                const p1 = document.createElement('p');
+                p1.textContent = `元の入力: ${input}`;
+                div.appendChild(p1);
+                
+                const p2 = document.createElement('p');
+                p2.textContent = `サニタイズ済み: ${sanitized}`;
+                div.appendChild(p2);
+                
+                const p3 = document.createElement('p');
+                p3.textContent = `文字数: ${input.length}`;
+                div.appendChild(p3);
+                
+                const p4 = document.createElement('p');
+                p4.textContent = `危険な文字を含む: ${/[<>]/.test(input) ? 'はい' : 'いいえ'}`;
+                div.appendChild(p4);
+                
+                resultDiv.appendChild(div);
+            } catch (error) {
+                resultDiv.innerHTML = '';
+                const div = document.createElement('div');
+                div.className = 'result error';
+                
+                const h3 = document.createElement('h3');
+                h3.textContent = '検証エラー！';
+                div.appendChild(h3);
+                
+                const p = document.createElement('p');
+                p.textContent = error.message;
+                div.appendChild(p);
+                
+                resultDiv.appendChild(div);
+            }
+        }
+
+        function testXSSPrevention() {
+            const input = document.getElementById('xssInput').value;
+            const resultDiv = document.getElementById('xssResult');
+            
+            // 安全な方法: textContent を使用
+            const safeOutput = input.replace(/[<>]/g, '');
+            
+            resultDiv.innerHTML = '';
+            
+            // 不安全な方法の説明（テキストのみ）
+            const unsafeDiv = document.createElement('div');
+            unsafeDiv.className = 'result unsafe';
+            
+            const unsafeH3 = document.createElement('h3');
+            unsafeH3.textContent = '不安全な方法 (innerHTML):';
+            unsafeDiv.appendChild(unsafeH3);
+            
+            const unsafeCode = document.createElement('div');
+            unsafeCode.className = 'code';
+            unsafeCode.textContent = 'element.innerHTML = userInput;';
+            unsafeDiv.appendChild(unsafeCode);
+            
+            const unsafeP = document.createElement('p');
+            unsafeP.textContent = '出力: ' + input; // textContent で安全に表示
+            unsafeDiv.appendChild(unsafeP);
+            
+            resultDiv.appendChild(unsafeDiv);
+            
+            // 安全な方法の説明
+            const safeDiv = document.createElement('div');
+            safeDiv.className = 'result safe';
+            
+            const safeH3 = document.createElement('h3');
+            safeH3.textContent = '安全な方法 (textContent):';
+            safeDiv.appendChild(safeH3);
+            
+            const safeCode = document.createElement('div');
+            safeCode.className = 'code';
+            safeCode.textContent = 'element.textContent = userInput;';
+            safeDiv.appendChild(safeCode);
+            
+            const safeP = document.createElement('p');
+            safeP.textContent = '出力: ' + safeOutput;
+            safeDiv.appendChild(safeP);
+            
+            resultDiv.appendChild(safeDiv);
+        }
+
+        function checkEnvironment() {
+            const resultDiv = document.getElementById('envResult');
+            
+            // 環境変数のチェックをシミュレート
+            const envChecks = {
+                'NODE_ENV': typeof process !== 'undefined' ? process.env?.NODE_ENV || '未設定' : 'ブラウザ環境',
+                'API_KEY_CONFIGURED': '.env ファイルを確認',
+                'PORT': '.env ファイルを確認'
+            };
+            
+            resultDiv.innerHTML = '';
+            const div = document.createElement('div');
+            div.className = 'result';
+            
+            const h3 = document.createElement('h3');
+            h3.textContent = '環境変数の状態:';
+            div.appendChild(h3);
+            
+            const ul = document.createElement('ul');
+            
+            const li1 = document.createElement('li');
+            li1.textContent = `NODE_ENV: ${envChecks.NODE_ENV}`;
+            ul.appendChild(li1);
+            
+            const li2 = document.createElement('li');
+            li2.textContent = `API_KEY: ${envChecks.API_KEY_CONFIGURED}`;
+            ul.appendChild(li2);
+            
+            const li3 = document.createElement('li');
+            li3.textContent = `PORT: ${envChecks.PORT}`;
+            ul.appendChild(li3);
+            
+            div.appendChild(ul);
+            
+            const p = document.createElement('p');
+            p.className = 'code';
+            p.textContent = 'ハードコードされた値の代わりに process.env.API_KEY を使用';
+            div.appendChild(p);
+            
+            resultDiv.appendChild(div);
+        }
+
+        function checkSecurityHeaders() {
+            const resultDiv = document.getElementById('headersResult');
+            
+            // 現在のセキュリティヘッダーをチェック
+            const headers = [
+                'X-Content-Type-Options',
+                'X-Frame-Options',
+                'X-XSS-Protection',
+                'Content-Security-Policy'
+            ];
+            
+            resultDiv.innerHTML = '';
+            const div = document.createElement('div');
+            div.className = 'result';
+            
+            const h3 = document.createElement('h3');
+            h3.textContent = 'セキュリティヘッダー:';
+            div.appendChild(h3);
+            
+            const ul = document.createElement('ul');
+            
+            headers.forEach(header => {
+                const status = document.querySelector(`meta[http-equiv="${header}"]`) ? '設定済み' : '未設定';
+                const li = document.createElement('li');
+                li.textContent = `${header}: ${status}`;
+                ul.appendChild(li);
+            });
+            
+            div.appendChild(ul);
+            
+            const p = document.createElement('p');
+            p.className = 'code';
+            p.textContent = 'サーバー設定でセキュリティヘッダーを追加';
+            div.appendChild(p);
+            
+            resultDiv.appendChild(div);
+        }
+
+        // Add security headers
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add meta tags for security headers (client-side simulation)
+            const metaTags = [
+                { httpEquiv: 'X-Content-Type-Options', content: 'nosniff' },
+                { httpEquiv: 'X-Frame-Options', content: 'DENY' },
+                { httpEquiv: 'X-XSS-Protection', content: '1; mode=block' }
+            ];
+            
+            metaTags.forEach(tag => {
+                const meta = document.createElement('meta');
+                meta.httpEquiv = tag.httpEquiv;
+                meta.content = tag.content;
+                document.head.appendChild(meta);
+            });
+        });
+    </script>
+</body>
+</html>
