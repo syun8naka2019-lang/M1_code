@@ -1,0 +1,1386 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Metroid ECS - FINAL (Steps 5+6+7)</title>
+<style>body{margin:0;overflow:hidden;background:black;}canvas{display:block;}</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// =============================
+// CONSTANTS
+// =============================
+const GRAVITY = 0.5;
+const WORLD_SIZE = 5;
+const ROOM_TYPES = ["jungle","volcano","factory","lab","tower","sky","secret","void","core"];
+
+// =============================
+// UTIL
+// =============================
+const Util = {
+  hit: (a,b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y,
+  clamp: (v,min,max) => Math.max(min, Math.min(max, v))
+};
+
+// =============================
+// INPUT
+// =============================
+class InputManager {
+  constructor(){
+    this.keys = {};
+    this.prevKeys = {};
+    this.mouse = {x:0,y:0};
+    addEventListener("keydown", e => this.keys[e.key] = true);
+    addEventListener("keyup", e => this.keys[e.key] = false);
+    addEventListener("mousemove", e => {
+      let rect = document.getElementById("c").getBoundingClientRect();
+      this.mouse.x = e.clientX - rect.left;
+      this.mouse.y = e.clientY - rect.top;
+    });
+  }
+  update(){ this.prevKeys = {...this.keys}; }
+  get left(){ return this.keys["ArrowLeft"] || this.keys["a"]; }
+  get right(){ return this.keys["ArrowRight"] || this.keys["d"]; }
+  get up(){ return this.keys["w"]; }
+  get down(){ return this.keys["s"]; }
+  get jump(){ return this.keys[" "] || this.keys["w"]; }
+  get morph(){ return this.keys["s"]; }
+  get saveKey(){ return this.keys["1"]; }
+  jumpPressed(){ return this.jump && !this.prevKeys[" "] && !this.prevKeys["w"]; }
+  morphPressed(){ return this.morph && !this.prevKeys["s"]; }
+}
+
+document.getElementById("c").addEventListener("mousedown", () => window.game && (window.game.input.mouseDown = true));
+document.getElementById("c").addEventListener("mouseup", () => window.game && (window.game.input.mouseDown = false));
+
+// =============================
+// COMPONENTS
+// =============================
+const C = {
+  Transform: (x,y,w,h) => ({x,y,w,h}),
+  Velocity: (vx=0,vy=0) => ({vx,vy}),
+  Gravity: (g=GRAVITY) => ({g}),
+  
+  Player: () => ({hp:5, maxHp:5, dir:1, inv:0, onGround:false, jumpCount:0, 
+                 morphBall:false, isMorph:false, doubleJump:false, showCoords:false,
+                 spawnX:100, spawnY:300}),
+  
+  Enemy: (type="normal", hp=2) => ({type, hp, maxHp:hp, onGround:false}),
+  State: (initial="idle") => ({state:initial, timer:0, mode:"orbit", angle:0, originX:0, originY:0, dir:1, t:0}),
+  
+  // Boss Component (NEW)
+  Boss: () => ({phase:1, maxPhase:3, phaseTimer:0, attackTimer:0, vulnerable:true, hp:50, maxHp:50}),
+  
+  // Elevator Component (NEW)
+  Elevator: (baseY, range=1000) => ({baseY, offset:0, range, speed:3}),
+  
+  // Hazard Component (NEW)
+  Hazard: (type, damage=1) => ({type, damage}), // lava, electric, thunder
+  
+  Collider: (solid=true, morphOnly=false) => ({solid, morphOnly}),
+  Item: (type) => ({type}), // morph, doubleJump, coord, savePoint
+  Sprite: (color="white") => ({color}),
+  Bullet: (vx, vy, isEnemy=false, damage=1) => ({vx, vy, isEnemy, damage, life:120}),
+  Health: (hp=2) => ({hp, maxHp:hp}),
+  Team: (team="neutral") => ({team}),
+  Lifetime: (frames) => ({life:frames, max:frames}),
+  Thunder: () => ({timer:0, active:false})
+};
+
+// =============================
+// ENTITY MANAGER
+// =============================
+class EntityManager {
+  constructor(){
+    this.entities = [];
+    this.nextId = 0;
+    this.toRemove = [];
+  }
+  create(components={}){
+    let e = {id:this.nextId++, ...components};
+    this.entities.push(e);
+    return e;
+  }
+  remove(e){ this.toRemove.push(e); }
+  flush(){ this.entities = this.entities.filter(e => !this.toRemove.includes(e)); this.toRemove = []; }
+  query(...names){ return this.entities.filter(e => names.every(n => e[n] !== undefined)); }
+}
+
+// =============================
+// SYSTEMS
+// =============================
+class GravitySystem {
+  update(em){
+    for(let e of em.query("Velocity","Gravity")){
+      e.Velocity.vy += e.Gravity.g;
+      e.Velocity.vy = Math.min(e.Velocity.vy, 20);
+    }
+  }
+}
+
+class MovementSystem {
+  update(em){
+    for(let e of em.query("Transform","Velocity")){
+      e.Transform.x += e.Velocity.vx;
+      e.Transform.y += e.Velocity.vy;
+    }
+  }
+}
+
+class CollisionSystem {
+  update(em, platforms){
+    let movers = em.query("Player","Transform","Velocity");
+    movers.push(...em.query("Enemy","Transform","Velocity"));
+    if(em.query("Boss").length > 0) movers.push(...em.query("Boss","Transform","Velocity"));
+    
+    for(let e of movers){
+      let t = e.Transform;
+      let v = e.Velocity;
+      let isPlayer = !!e.Player;
+      let isEnemy = !!e.Enemy;
+      let isBoss = !!e.Boss;
+      
+      if(isPlayer) e.Player.onGround = false;
+      if(isEnemy) e.Enemy.onGround = false;
+      
+      for(let plat of platforms){
+        if(v.vy >= 0 && Util.hit(t, plat)){
+          t.y = plat.y - t.h;
+          v.vy = 0;
+          if(isPlayer){ e.Player.onGround = true; e.Player.jumpCount = 0; }
+          if(isEnemy){ e.Enemy.onGround = true; }
+        }
+      }
+      
+      if(isPlayer) t.x = Util.clamp(t.x, 0, 3950);
+    }
+  }
+}
+
+class PlayerSystem {
+  constructor(input, em){ this.input = input; this.em = em; }
+  
+  update(walls){
+    for(let e of this.em.query("Player","Transform","Velocity")){
+      let p = e.Player;
+      let t = e.Transform;
+      let v = e.Velocity;
+      
+      if(p.inv > 0) p.inv--;
+      
+      if(this.input.morphPressed() && p.morphBall){
+        this.toggleMorph(e, walls);
+      }
+      
+      if(p.isMorph){
+        v.vx += Math.sign(v.vx) * 0.2;
+        v.vx *= 0.95;
+      }
+      
+      if(this.input.left){ v.vx = -5; p.dir = 1; }
+      else if(this.input.right){ v.vx = 5; p.dir = -1; }
+      else if(!p.isMorph){ v.vx = 0; }
+      
+      if(this.input.jumpPressed()){
+        this.doJump(e);
+      }
+    }
+  }
+  
+  doJump(e){
+    let p = e.Player;
+    let v = e.Velocity;
+    
+    if(p.onGround){
+      v.vy = -14;
+      p.jumpCount = 1;
+      p.onGround = false;
+    } else if(p.jumpCount < 2){
+      v.vy = -12;
+      p.jumpCount++;
+    } else if(p.doubleJump && p.jumpCount < 3){
+      v.vy = -12;
+      p.jumpCount++;
+    }
+  }
+  
+  toggleMorph(e, walls){
+    let p = e.Player;
+    let t = e.Transform;
+    
+    if(!p.isMorph){
+      p.isMorph = true;
+      t.h = 30;
+      t.y += 10;
+    } else {
+      let canStand = true;
+      let test = {x: t.x, y: t.y - 10, w: t.w, h: 40};
+      for(let w of walls){
+        if(Util.hit(test, w.Transform)){
+          canStand = false;
+          break;
+        }
+      }
+      if(canStand){
+        p.isMorph = false;
+        t.h = 40;
+        t.y -= 10;
+      }
+    }
+  }
+}
+
+// =============================
+// ELEVATOR SYSTEM (NEW)
+// =============================
+class ElevatorSystem {
+  constructor(em, input){ this.em = em; this.input = input; }
+  
+  update(platforms){
+    for(let elev of this.em.query("Elevator","Transform")){
+      let et = elev.Transform;
+      let el = elev.Elevator;
+      let currentY = el.baseY + el.offset;
+      
+      for(let p of this.em.query("Player","Transform")){
+        let pt = p.Transform;
+        let onElev = pt.x < et.x + et.w && pt.x + pt.w > et.x &&
+                     pt.y + pt.h >= currentY - 15 && pt.y + pt.h <= currentY + 15;
+        
+        if(onElev){
+          // W/S controls
+          if(this.input.up) el.offset -= el.speed;
+          if(this.input.down) el.offset += el.speed;
+          
+          // Clamp range
+          el.offset = Util.clamp(el.offset, 0, el.range);
+          
+          // Player follows elevator when falling/standing
+          if(p.Velocity.vy >= 0){
+            if(pt.y + pt.h >= currentY - 5){
+              pt.y = currentY - pt.h;
+              p.Velocity.vy = 0;
+              p.Player.onGround = true;
+            }
+          }
+        }
+      }
+      
+      // Update elevator platform position
+      for(let plat of platforms){
+        if(plat.isElev){
+          plat.y = el.baseY + el.offset;
+        }
+      }
+    }
+  }
+}
+
+// =============================
+// HAZARD SYSTEM (NEW)
+// =============================
+class HazardSystem {
+  constructor(em, particles){ this.em = em; this.particles = particles; }
+  
+  update(){
+    let players = this.em.query("Player","Transform");
+    let hazards = this.em.query("Hazard","Transform");
+    
+    for(let p of players){
+      if(p.Player.inv > 0) continue;
+      
+      for(let h of hazards){
+        if(Util.hit(p.Transform, h.Transform)){
+          switch(h.Hazard.type){
+            case "lava":
+              this.damagePlayer(p, h.Hazard.damage, "lava");
+              break;
+            case "electric":
+              if(Math.random() < 0.05){
+                this.damagePlayer(p, h.Hazard.damage, "electric");
+              }
+              break;
+          }
+        }
+      }
+    }
+  }
+  
+  damagePlayer(p, dmg, type){
+    p.Player.hp -= dmg;
+    p.Player.inv = 60;
+    
+    if(type === "lava"){
+      p.Transform.x = p.Player.spawnX;
+      p.Transform.y = p.Player.spawnY;
+      this.particles.spawn(p.Transform.x, p.Transform.y, 20, ["orange","red"]);
+    }
+  }
+}
+
+// =============================
+// THUNDER SYSTEM (NEW)
+// =============================
+class ThunderSystem {
+  constructor(em, particles){ this.em = em; this.particles = particles; }
+  
+  update(){
+    // Random thunder spawn in factory rooms
+    if(Math.random() < 0.003){
+      let x = Math.random() * 4000;
+      this.em.create({
+        Transform: C.Transform(x, 0, 20, 600),
+        Thunder: C.Thunder(),
+        Hazard: C.Hazard("thunder", 1),
+        Sprite: C.Sprite("red")
+      });
+    }
+    
+    // Update thunders
+    for(let t of this.em.query("Thunder","Transform")){
+      t.Thunder.timer++;
+      
+      // Warning phase (red line)
+      if(t.Thunder.timer < 60){
+        t.Thunder.active = false;
+      }
+      // Strike phase (lightning)
+      else if(t.Thunder.timer < 90){
+        t.Thunder.active = true;
+        // Check player hit
+        for(let p of this.em.query("Player","Transform")){
+          if(p.Player.inv <= 0 && Util.hit(p.Transform, t.Transform)){
+            p.Player.hp -= 1;
+            p.Player.inv = 60;
+            this.particles.spawn(p.Transform.x, p.Transform.y, 15, ["cyan","white"]);
+          }
+        }
+      }
+      // Remove after 90 frames
+      if(t.Thunder.timer >= 90){
+        this.em.remove(t);
+      }
+    }
+  }
+}
+
+// =============================
+// BOSS SYSTEM (NEW)
+// =============================
+class BossSystem {
+  constructor(em, particles){ this.em = em; this.particles = particles; }
+  
+  update(playerTransform){
+    for(let e of this.em.query("Boss","Transform","Velocity","State")){
+      let b = e.Boss;
+      let t = e.Transform;
+      let v = e.Velocity;
+      let s = e.State;
+      
+      s.timer++;
+      b.phaseTimer++;
+      
+      let dx = playerTransform.x - t.x;
+      let dy = playerTransform.y - t.y;
+      let dist = Math.sqrt(dx*dx + dy*dy);
+      
+      // Phase transitions
+      if(b.hp <= 30 && b.phase === 1){
+        b.phase = 2;
+        b.phaseTimer = 0;
+        this.particles.spawn(t.x + t.w/2, t.y + t.h/2, 30, ["purple","magenta"]);
+      }
+      if(b.hp <= 10 && b.phase === 2){
+        b.phase = 3;
+        b.phaseTimer = 0;
+        b.vulnerable = false;
+        this.particles.spawn(t.x + t.w/2, t.y + t.h/2, 40, ["red","orange"]);
+      }
+      
+      // Phase-based AI
+      switch(b.phase){
+        case 1: // Phase 1: Basic chase + jump
+          v.vx = Math.sign(dx) * 3;
+          if(Math.random() < 0.02 && v.vy === 0){
+            v.vy = -12;
+          }
+          break;
+          
+        case 2: // Phase 2: Faster + pattern attack
+          v.vx = Math.sign(dx) * 5;
+          
+          // Jump attack
+          if(b.phaseTimer % 120 < 30){
+            if(v.vy === 0 && b.phaseTimer % 120 === 0){
+              v.vy = -15;
+            }
+            // Ground pound effect
+            if(v.vy > 10 && t.y > 500){
+              this.particles.spawn(t.x + t.w/2, 550, 15, ["brown","gray"]);
+            }
+          }
+          break;
+          
+        case 3: // Phase 3: Desperate + vulnerable windows
+          // Invulnerable most of the time
+          b.vulnerable = b.phaseTimer % 180 > 120; // Vulnerable for 60 frames
+          
+          if(b.vulnerable){
+            v.vx = Math.sign(dx) * 2;
+            t.y += Math.sin(b.phaseTimer/10) * 2; // Shake
+          } else {
+            v.vx = Math.sign(dx) * 7; // Fast chase
+            if(Math.random() < 0.05){
+              // Shoot bullets
+              this.shootBullet(t.x + t.w/2, t.y + t.h/2, dx/dist*8, dy/dist*8);
+            }
+          }
+          break;
+      }
+      
+      // Gravity
+      v.vy += GRAVITY;
+      v.vy = Math.min(v.vy, 20);
+    }
+  }
+  
+  shootBullet(x, y, vx, vy){
+    this.em.create({
+      Transform: C.Transform(x-4, y-4, 8, 8),
+      Bullet: C.Bullet(vx, vy, true, 1),
+      Sprite: C.Sprite("red"),
+      Team: C.Team("enemy")
+    });
+  }
+}
+
+// =============================
+// STATE SYSTEM (Enemy AI)
+// =============================
+class StateSystem {
+  constructor(em){ this.em = em; }
+  
+  update(playerTransform, platforms, time){
+    for(let e of this.em.query("Enemy","State","Transform","Velocity")){
+      let s = e.State;
+      let t = e.Transform;
+      let v = e.Velocity;
+      let en = e.Enemy;
+      
+      s.timer++; s.t++;
+      if(s.originX === 0 && s.originY === 0){ s.originX = t.x; s.originY = t.y; }
+      
+      let dx = playerTransform.x - t.x;
+      let dy = playerTransform.y - t.y;
+      
+      switch(en.type){
+        case "normal":
+          if(Math.abs(dx) < 300) v.vx = Math.sign(dx) * 2 + Math.sin(time / 300);
+          else v.vx = Math.sin(time / 500) * 2;
+          if(Math.random() < 0.005 && e.Enemy.onGround) v.vy = -8 - Math.random() * 4;
+          v.vy = (v.vy || 0) + GRAVITY;
+          break;
+        case "fly":
+          s.angle += 0.05;
+          let r = 50 + 20 * Math.sin(time / 300);
+          t.x = s.originX + Math.cos(s.angle) * r;
+          t.y = s.originY + Math.sin(s.angle) * r;
+          break;
+        case "hoverCrab":
+          v.vx = Math.sign(dx) * 2 + Math.sin(time / 200);
+          v.vy = Math.sign(dy) + Math.cos(time / 200);
+          t.x += v.vx / 2; t.y += v.vy;
+          break;
+        case "crazyFly":
+          s.angle += 0.075;
+          t.x = s.originX + Math.cos(s.angle) * 10;
+          t.y = s.originY + Math.sin(s.angle) * 10;
+          if(s.t % 60 < 20){ t.x += Math.sign(dx) * 10; t.y += Math.sign(dy) * 1.9; s.originX = t.x; s.originY = t.y; }
+          break;
+        case "crazyFly2":
+          if(s.mode === "orbit"){
+            s.angle += 0.06;
+            let ax = ((dx + Math.cos(s.angle)*120) - (t.x - (t.x - dx))) * 0.05;
+            let ay = ((dy + Math.sin(s.angle)*120) - (t.y - (t.y - dy))) * 0.05;
+            v.vx = (v.vx || 0) + ax; v.vy = (v.vy || 0) + ay;
+            v.vx *= 0.9; v.vy *= 0.9;
+            t.x += v.vx; t.y += v.vy;
+            if(s.t % 180 === 0){ s.mode = "charge"; let len = Math.sqrt(dx*dx + dy*dy) || 1; v.vx = dx/len * 5; v.vy = dy/len * 5; }
+          } else if(s.mode === "charge"){
+            t.x += v.vx; t.y += v.vy;
+            v.vx *= 0.97; v.vy *= 0.97;
+            if(Math.abs(v.vx) + Math.abs(v.vy) < 1) s.mode = "orbit";
+          }
+          break;
+        case "factory":
+          t.x += s.dir * 2;
+          if(t.x > 3000 || t.x < 500) s.dir *= -1;
+          t.y += Math.sin(time / 300) * 0.5;
+          break;
+        case "volcano":
+          t.y += Math.sin(time / 200) * 2;
+          break;
+        case "jungle":
+          if(Math.abs(dx) < 200) t.x += Math.sign(dx) * 2;
+          break;
+      }
+    }
+  }
+}
+
+class BulletSystem {
+  constructor(em, input, camera){ this.em = em; this.input = input; this.camera = camera; }
+  update(){
+    for(let b of this.em.query("Bullet","Transform")){
+      b.Transform.x += b.Bullet.vx;
+      b.Transform.y += b.Bullet.vy;
+      b.Bullet.life--;
+      if(b.Bullet.life <= 0 || b.Transform.x < 0 || b.Transform.x > 4000 || b.Transform.y < 0 || b.Transform.y > 1000)
+        this.em.remove(b);
+    }
+  }
+  tryShoot(playerEntity){
+    if(!this.input.mouseDown) return;
+    let t = playerEntity.Transform;
+    let aimX = this.input.mouse.x + this.camera.x;
+    let aimY = this.input.mouse.y + this.camera.y;
+    let dx = aimX - (t.x + t.w/2);
+    let dy = aimY - (t.y + t.h/2);
+    let len = Math.sqrt(dx*dx + dy*dy);
+    if(len === 0) return;
+    let speed = 12;
+    this.em.create({
+      Transform: C.Transform(t.x + t.w/2 - 4, t.y + t.h/2 - 4, 8, 8),
+      Bullet: C.Bullet(dx/len*speed, dy/len*speed, false, 1),
+      Sprite: C.Sprite("yellow"),
+      Team: C.Team("player")
+    });
+  }
+}
+
+class CombatSystem {
+  constructor(em, particles){ this.em = em; this.particles = particles; }
+  update(){
+    let bullets = this.em.query("Bullet","Transform");
+    let enemies = this.em.query("Enemy","Transform","Health");
+    let bosses = this.em.query("Boss","Transform","Health");
+    let players = this.em.query("Player","Transform");
+    
+    // Player bullets hit enemies
+    for(let b of bullets){
+      if(b.Bullet.isEnemy) continue;
+      
+      // Hit enemies
+      for(let e of enemies){
+        if(Util.hit(b.Transform, e.Transform)){
+          e.Health.hp -= b.Bullet.damage;
+          this.em.remove(b);
+          this.particles.spawn(e.Transform.x + e.Transform.w/2, e.Transform.y + e.Transform.h/2, 10, ["orange","yellow"]);
+          if(e.Health.hp <= 0){ this.em.remove(e); this.particles.spawn(e.Transform.x + e.Transform.w/2, e.Transform.y + e.Transform.h/2, 20, ["red","orange"]); }
+          break;
+        }
+      }
+      
+      // Hit boss (only if vulnerable)
+      for(let boss of bosses){
+        if(!boss.Boss.vulnerable) continue;
+        if(Util.hit(b.Transform, boss.Transform)){
+          boss.Boss.hp -= b.Bullet.damage;
+          this.em.remove(b);
+          this.particles.spawn(boss.Transform.x + boss.Transform.w/2, boss.Transform.y + boss.Transform.h/2, 15, ["purple","magenta"]);
+          if(boss.Boss.hp <= 0){ this.em.remove(boss); this.particles.spawn(boss.Transform.x + boss.Transform.w/2, boss.Transform.y + boss.Transform.h/2, 50, ["gold","orange","red"]); }
+          break;
+        }
+      }
+    }
+    
+    // Enemy bullets hit player
+    for(let b of bullets){
+      if(!b.Bullet.isEnemy) continue;
+      for(let p of players){
+        if(p.Player.inv <= 0 && Util.hit(b.Transform, p.Transform)){
+          p.Player.hp -= b.Bullet.damage; p.Player.inv = 60; this.em.remove(b);
+        }
+      }
+    }
+    
+    // Enemy touch damage
+    for(let p of players){
+      if(p.Player.inv > 0) continue;
+      for(let e of enemies){
+        if(Util.hit(p.Transform, e.Transform)){
+          p.Player.hp -= 1; p.Player.inv = 60;
+          p.Velocity.vx += p.Transform.x < e.Transform.x ? -8 : 8;
+          p.Velocity.vy = -6;
+        }
+      }
+      // Boss touch damage
+      for(let b of bosses){
+        if(Util.hit(p.Transform, b.Transform)){
+          p.Player.hp -= 2; p.Player.inv = 60;
+          p.Velocity.vx += p.Transform.x < b.Transform.x ? -10 : 10;
+          p.Velocity.vy = -8;
+        }
+      }
+    }
+  }
+}
+
+class ParticleSystem {
+  constructor(em){ this.em = em; }
+  spawn(x, y, count, colors){
+    for(let i = 0; i < count; i++){
+      this.em.create({
+        Transform: C.Transform(x, y, 4, 4),
+        Velocity: C.Velocity((Math.random()-0.5)*10, (Math.random()-0.5)*10),
+        Sprite: C.Sprite(colors[Math.floor(Math.random()*colors.length)]),
+        Lifetime: C.Lifetime(30)
+      });
+    }
+  }
+  update(){
+    for(let p of this.em.query("Lifetime","Transform")){
+      p.Velocity.vy += 0.2;
+      p.Lifetime.life--;
+      if(p.Lifetime.life <= 0) this.em.remove(p);
+    }
+  }
+}
+
+// =============================
+// ROOM MANAGER
+// =============================
+class RoomManager {
+  constructor(em, worldSize){
+    this.em = em;
+    this.worldSize = worldSize;
+    this.world = [];
+    this.currentRoom = null;
+    this.wx = 0; this.wy = 0;
+    this.generateWorld();
+  }
+  
+  generateWorld(){
+    for(let y = 0; y < this.worldSize; y++){
+      this.world[y] = [];
+      for(let x = 0; x < this.worldSize; x++){
+        let type = ROOM_TYPES[(x + y) % ROOM_TYPES.length];
+        this.world[y][x] = {
+          type: type,
+          visited: false,
+          platforms: this.generatePlatforms(type),
+          walls: [{x:0,y:0,w:20,h:600},{x:3980,y:0,w:20,h:600}],
+          enemies: this.generateEnemies(type),
+          items: this.generateItems(type),
+          hazards: this.generateHazards(type),
+          hasElevator: type === "jungle",
+          hasBoss: type === "core",
+          color: this.getRoomColor(type)
+        };
+      }
+    }
+  }
+  
+  generatePlatforms(type){
+    let base = [{x:0,y:550,w:4000,h:50}];
+    switch(type){
+      case "jungle":
+        base.push({x:200,y:450,w:200,h:20});
+        base.push({x:600,y:350,w:200,h:20});
+        base.push({x:2300,y:470,w:80,h:20,isElev:true});
+        break;
+      case "volcano":
+        base.push({x:300,y:450,w:200,h:20});
+        base.push({x:700,y:350,w:200,h:20});
+        base.push({x:1200,y:300,w:200,h:20});
+        break;
+      case "factory":
+        base.push({x:400,y:450,w:200,h:20});
+        base.push({x:800,y:350,w:200,h:20});
+        base.push({x:1400,y:300,w:200,h:20});
+        break;
+      case "lab":
+        base.push({x:200,y:450,w:200,h:20});
+        base.push({x:600,y:350,w:200,h:20});
+        base.push({x:1000,y:250,w:200,h:20});
+        break;
+      case "sky":
+        base.push({x:300,y:400,w:200,h:20});
+        base.push({x:700,y:300,w:200,h:20});
+        base.push({x:1100,y:200,w:200,h:20});
+        break;
+      case "tower":
+        base.push({x:200,y:500,w:200,h:20});
+        base.push({x:400,y:420,w:200,h:20});
+        base.push({x:600,y:340,w:200,h:20});
+        base.push({x:800,y:260,w:200,h:20});
+        break;
+    }
+    return base;
+  }
+  
+  generateEnemies(type){
+    if(type === "core") return []; // Boss room
+    let enemies = [];
+    let count = type === "factory" ? 7 : 5;
+    let types = ["normal","fly","hoverCrab","crazyFly","crazyFly2","factory","jungle","volcano"];
+    for(let i = 0; i < count; i++){
+      enemies.push({x: 500 + i * 400, y: 500, type: types[i % types.length], hp: i % 3 === 0 ? 3 : 2});
+    }
+    return enemies;
+  }
+  
+  generateItems(type){
+    let items = [];
+    if(type === "jungle") items.push({x:1500,y:500,type:"morph"});
+    if(type === "factory") items.push({x:1500,y:280,type:"doubleJump"});
+    if(type === "secret") items.push({x:2000,y:500,type:"coord"});
+    items.push({x:200,y:480,type:"savePoint"});
+    return items;
+  }
+  
+  generateHazards(type){
+    let hazards = [];
+    if(type === "volcano"){
+      hazards.push({x:0,y:580,w:4000,h:50,type:"lava",damage:2});
+    }
+    if(type === "factory"){
+      hazards.push({x:1200,y:520,w:200,h:20,type:"electric",damage:1});
+    }
+    return hazards;
+  }
+  
+  getRoomColor(type){
+    const colors = {jungle:"#0b1f0b",volcano:"#2b0f0f",factory:"#0f1b2b",lab:"#111122",sky:"#88ccff",tower:"#111",secret:"#222244",void:"black",core:"#220022"};
+    return colors[type] || "#0b1f0b";
+  }
+  
+  loadRoom(wx, wy, playerEntity){
+    // Clear non-player entities
+    for(let e of [...this.em.entities]){
+      if(!e.Player) this.em.remove(e);
+    }
+    this.em.flush();
+    
+    this.wx = wx; this.wy = wy;
+    this.currentRoom = this.world[wy][wx];
+    this.currentRoom.visited = true;
+    
+    // Spawn elevator
+    if(this.currentRoom.hasElevator){
+      let elevPlat = this.currentRoom.platforms.find(p => p.isElev);
+      if(elevPlat){
+        this.em.create({
+          Transform: C.Transform(elevPlat.x, elevPlat.y - 100, elevPlat.w, 80),
+          Elevator: C.Elevator(elevPlat.y - 100, 1000),
+          Sprite: C.Sprite("silver")
+        });
+      }
+    }
+    
+    // Spawn boss
+    if(this.currentRoom.hasBoss){
+      this.em.create({
+        Transform: C.Transform(2000, 300, 120, 120),
+        Velocity: C.Velocity(),
+        Boss: C.Boss(),
+        Health: C.Health(50),
+        State: C.State("idle"),
+        Sprite: C.Sprite("purple"),
+        Collider: C.Collider()
+      });
+    }
+    
+    // Spawn enemies
+    for(let e of this.currentRoom.enemies){
+      this.em.create({
+        Transform: C.Transform(e.x, e.y, 30, 30),
+        Velocity: C.Velocity(),
+        Enemy: C.Enemy(e.type, e.hp),
+        Health: C.Health(e.hp),
+        State: C.State("idle"),
+        Sprite: C.Sprite("red"),
+        Collider: C.Collider(false)
+      });
+    }
+    
+    // Spawn items
+    for(let item of this.currentRoom.items){
+      this.em.create({
+        Transform: C.Transform(item.x, item.y, 30, 30),
+        Item: C.Item(item.type),
+        Sprite: C.Sprite(item.type === "morph" ? "orange" : item.type === "doubleJump" ? "gold" : item.type === "savePoint" ? "cyan" : "lime")
+      });
+    }
+    
+    // Spawn hazards
+    for(let h of this.currentRoom.hazards){
+      this.em.create({
+        Transform: C.Transform(h.x, h.y, h.w, h.h),
+        Hazard: C.Hazard(h.type, h.damage),
+        Sprite: C.Sprite(h.type === "lava" ? "orange" : "cyan")
+      });
+    }
+    
+    // Spawn walls
+    for(let w of this.currentRoom.walls){
+      this.em.create({
+        Transform: C.Transform(w.x, w.y, w.w, w.h),
+        Collider: C.Collider()
+      });
+    }
+    
+    return this.currentRoom;
+  }
+  
+  checkTransition(playerEntity){
+    let t = playerEntity.Transform;
+    let p = playerEntity.Player;
+    
+    if(t.x < 0 && this.wx > 0){
+      this.wx--; t.x = 3950; p.spawnX = 3950; p.spawnY = t.y;
+      return true;
+    }
+    if(t.x > 3950 && this.wx < this.worldSize - 1){
+      this.wx++; t.x = 50; p.spawnX = 50; p.spawnY = t.y;
+      return true;
+    }
+    return false;
+  }
+  
+  getCurrentPlatforms(){ return this.currentRoom?.platforms || []; }
+  getCurrentWalls(){ return this.em.query("Collider","Transform").filter(e => !e.Player && !e.Enemy && !e.Boss); }
+  getCurrentColor(){ return this.currentRoom?.color || "#0b1f0b"; }
+  getCurrentType(){ return this.currentRoom?.type || "jungle"; }
+}
+
+// =============================
+// SAVE SYSTEM (NEW)
+// =============================
+class SaveSystem {
+  constructor(){
+    this.saveEnabled = true;
+    this.hasSave = false;
+    try {
+      this.hasSave = localStorage.getItem("metroidECSSave") !== null;
+    } catch(e) { this.saveEnabled = false; }
+  }
+  
+  save(game){
+    if(!this.saveEnabled) return false;
+    
+    try {
+      let p = game.player.Player;
+      let t = game.player.Transform;
+      let data = {
+        wx: game.roomManager.wx,
+        wy: game.roomManager.wy,
+        player: {
+          x: t.x, y: t.y,
+          spawnX: p.spawnX, spawnY: p.spawnY,
+          hp: p.hp, maxHp: p.maxHp,
+          morphBall: p.morphBall,
+          doubleJump: p.doubleJump,
+          showCoords: p.showCoords,
+          isMorph: p.isMorph
+        },
+        visitedRooms: game.roomManager.world.map(row => row.map(r => r.visited))
+      };
+      localStorage.setItem("metroidECSSave", JSON.stringify(data));
+      this.hasSave = true;
+      return true;
+    } catch(e) { return false; }
+  }
+  
+  load(game){
+    if(!this.saveEnabled || !this.hasSave) return false;
+    
+    try {
+      let data = JSON.parse(localStorage.getItem("metroidECSSave"));
+      if(!data) return false;
+      
+      let p = game.player.Player;
+      let t = game.player.Transform;
+      
+      // Restore position
+      t.x = data.player.x;
+      t.y = data.player.y;
+      p.spawnX = data.player.spawnX;
+      p.spawnY = data.player.spawnY;
+      
+      // Restore stats
+      p.hp = data.player.hp;
+      p.maxHp = data.player.maxHp;
+      p.morphBall = data.player.morphBall;
+      p.doubleJump = data.player.doubleJump;
+      p.showCoords = data.player.showCoords;
+      p.isMorph = data.player.isMorph;
+      
+      if(p.isMorph){
+        t.h = 30;
+      } else {
+        t.h = 40;
+      }
+      
+      // Restore visited rooms
+      for(let y = 0; y < game.roomManager.worldSize; y++){
+        for(let x = 0; x < game.roomManager.worldSize; x++){
+          if(data.visitedRooms && data.visitedRooms[y] && data.visitedRooms[y][x]){
+            game.roomManager.world[y][x].visited = true;
+          }
+        }
+      }
+      
+      // Load room
+      game.roomManager.loadRoom(data.wx, data.wy, game.player);
+      
+      return true;
+    } catch(e) { return false; }
+  }
+  
+  clear(){
+    if(!this.saveEnabled) return;
+    localStorage.removeItem("metroidECSSave");
+    this.hasSave = false;
+  }
+}
+
+// =============================
+// RENDER SYSTEM
+// =============================
+class RenderSystem {
+  constructor(canvas){ 
+    this.c = canvas; 
+    this.ctx = canvas.getContext("2d");
+    this.saveMessage = "";
+    this.saveTimer = 0;
+  }
+  resize(){ this.c.width = innerWidth; this.c.height = innerHeight; }
+  
+  showSaveMessage(msg){
+    this.saveMessage = msg;
+    this.saveTimer = 120;
+  }
+  
+  draw(em, roomManager, camera){
+    this.ctx.clearRect(0, 0, this.c.width, this.c.height);
+    this.ctx.save();
+    this.ctx.translate(-camera.x, -camera.y);
+    
+    let room = roomManager.currentRoom;
+    if(!room) return;
+    
+    // Background
+    this.ctx.fillStyle = room.color;
+    this.ctx.fillRect(0, 0, 4000, 1000);
+    
+    // Hazards
+    for(let h of em.query("Hazard","Transform")){
+      let t = h.Transform;
+      if(h.Hazard.type === "lava"){
+        this.ctx.fillStyle = "orange";
+        this.ctx.fillRect(t.x, t.y, t.w, t.h);
+      } else if(h.Hazard.type === "electric"){
+        this.ctx.fillStyle = "cyan";
+        this.ctx.fillRect(t.x, t.y, t.w, t.h);
+      }
+    }
+    
+    // Platforms
+    this.ctx.fillStyle = "green";
+    for(let p of room.platforms){
+      this.ctx.fillRect(p.x, p.y, p.w, p.h);
+    }
+    
+    // Walls
+    this.ctx.fillStyle = "gray";
+    for(let w of em.query("Collider","Transform")){
+      if(w.Player || w.Enemy || w.Boss) continue;
+      let t = w.Transform;
+      this.ctx.fillRect(t.x, t.y, t.w, t.h);
+    }
+    
+    // Elevator
+    for(let elev of em.query("Elevator","Transform")){
+      let t = elev.Transform;
+      let el = elev.Elevator;
+      let currentY = el.baseY + el.offset;
+      this.ctx.fillStyle = "silver";
+      this.ctx.fillRect(t.x, currentY, t.w, t.h);
+      this.ctx.fillStyle = "black";
+      this.ctx.font = "14px sans-serif";
+      this.ctx.fillText("W/S", t.x + 10, currentY + 45);
+    }
+    
+    // Thunder
+    for(let t of em.query("Thunder","Transform")){
+      if(t.Thunder.timer < 60){
+        // Warning
+        this.ctx.strokeStyle = "red";
+        this.ctx.lineWidth = 2;
+        this.ctx.beginPath();
+        this.ctx.moveTo(t.Transform.x, 0);
+        this.ctx.lineTo(t.Transform.x, 600);
+        this.ctx.stroke();
+      } else {
+        // Strike
+        this.ctx.strokeStyle = "cyan";
+        this.ctx.lineWidth = 4;
+        this.ctx.beginPath();
+        this.ctx.moveTo(t.Transform.x, 0);
+        let x = t.Transform.x;
+        for(let y = 0; y < 600; y += 40){
+          x += (Math.random() - 0.5) * 30;
+          this.ctx.lineTo(x, y);
+        }
+        this.ctx.stroke();
+      }
+    }
+    
+    // Items
+    for(let item of em.query("Item","Transform")){
+      let t = item.Transform;
+      switch(item.Item.type){
+        case "morph": this.ctx.fillStyle = "orange"; break;
+        case "doubleJump": this.ctx.fillStyle = "gold"; break;
+        case "coord": this.ctx.fillStyle = "lime"; break;
+        case "savePoint": this.ctx.fillStyle = "cyan"; break;
+      }
+      this.ctx.fillRect(t.x, t.y, 30, 30);
+    }
+    
+    // Bullets
+    this.ctx.fillStyle = "yellow";
+    for(let b of em.query("Bullet","Transform")){
+      this.ctx.fillRect(b.Transform.x, b.Transform.y, 8, 8);
+    }
+    
+    // Particles
+    for(let p of em.query("Lifetime","Transform")){
+      let alpha = p.Lifetime.life / p.Lifetime.max;
+      this.ctx.globalAlpha = alpha;
+      this.ctx.fillStyle = p.Sprite?.color || "white";
+      this.ctx.fillRect(p.Transform.x, p.Transform.y, 4, 4);
+      this.ctx.globalAlpha = 1;
+    }
+    
+    // Boss
+    for(let e of em.query("Boss","Transform","Health")){
+      let t = e.Transform;
+      let b = e.Boss;
+      
+      // Boss body with phase-based color
+      if(b.phase === 1) this.ctx.fillStyle = "purple";
+      else if(b.phase === 2) this.ctx.fillStyle = "magenta";
+      else this.ctx.fillStyle = b.vulnerable ? "red" : "darkred";
+      
+      this.ctx.fillRect(t.x, t.y, t.w, t.h);
+      
+      // Boss HP bar (big)
+      this.ctx.fillStyle = "black";
+      this.ctx.fillRect(t.x, t.y - 15, t.w, 8);
+      this.ctx.fillStyle = "lime";
+      this.ctx.fillRect(t.x, t.y - 15, t.w * (b.hp / b.maxHp), 8);
+      
+      // Phase indicator
+      this.ctx.fillStyle = "white";
+      this.ctx.font = "12px sans-serif";
+      this.ctx.fillText("PHASE " + b.phase, t.x, t.y - 20);
+    }
+    
+    // Enemies
+    for(let e of em.query("Enemy","Transform","Health","State")){
+      let t = e.Transform;
+      let s = e.State;
+      
+      switch(e.Enemy.type){
+        case "fly":
+        case "crazyFly":
+        case "crazyFly2":
+          this.ctx.fillStyle = "cyan";
+          this.ctx.beginPath();
+          this.ctx.ellipse(t.x + t.w/2, t.y + t.h/2, t.w, t.h/2 + Math.sin(s.t/5)*5, 0, 0, Math.PI*2);
+          this.ctx.fill();
+          break;
+        case "factory":
+          this.ctx.save();
+          this.ctx.translate(t.x + t.w/2, t.y + t.h/2);
+          s.angle = (s.angle || 0) + 0.02;
+          this.ctx.rotate(s.angle);
+          this.ctx.fillStyle = "magenta";
+          for(let i = 0; i < 4; i++){
+            this.ctx.fillRect(Math.cos(i*Math.PI/2)*15-5, Math.sin(i*Math.PI/2)*15-5, 10, 10);
+          }
+          this.ctx.restore();
+          break;
+        default:
+          this.ctx.fillStyle = "red";
+          this.ctx.fillRect(t.x, t.y, t.w, t.h);
+      }
+      
+      // HP bar
+      this.ctx.fillStyle = "black";
+      this.ctx.fillRect(t.x, t.y - 8, t.w, 4);
+      this.ctx.fillStyle = "lime";
+      this.ctx.fillRect(t.x, t.y - 8, t.w * (e.Health.hp / e.Health.maxHp), 4);
+    }
+    
+    // Player
+    for(let e of em.query("Player","Transform")){
+      let t = e.Transform;
+      let p = e.Player;
+      
+      if(p.inv > 0 && Math.floor(p.inv / 5) % 2 === 0){
+        this.ctx.fillStyle = "red";
+      } else {
+        this.ctx.fillStyle = "white";
+      }
+      
+      if(p.isMorph){
+        this.ctx.beginPath();
+        this.ctx.arc(t.x + t.w/2, t.y + t.h/2, t.w/2, 0, Math.PI*2);
+        this.ctx.fill();
+      } else {
+        this.ctx.fillRect(t.x, t.y, t.w, t.h);
+      }
+      
+      if(p.inv > 0){
+        this.ctx.globalAlpha = (p.inv % 20 < 10) ? 0.3 : 0.1;
+        this.ctx.fillStyle = "red";
+        this.ctx.fillRect(t.x - 5, t.y - 5, t.w + 10, t.h + 10);
+        this.ctx.globalAlpha = 1;
+      }
+    }
+    
+    this.ctx.restore();
+  }
+  
+  drawUI(player, roomManager, saveSystem){
+    this.ctx.fillStyle = "white";
+    this.ctx.font = "16px sans-serif";
+    this.ctx.fillText("HP: " + player.hp + "/" + player.maxHp, 20, 30);
+    this.ctx.fillText("ROOM: " + roomManager.getCurrentType().toUpperCase(), 20, 50);
+    this.ctx.fillText("[" + roomManager.wx + "," + roomManager.wy + "]", 20, 70);
+    
+    if(player.showCoords){
+      this.ctx.fillStyle = "lime";
+      this.ctx.fillText("X: " + Math.floor(player.Transform.x) + " Y: " + Math.floor(player.Transform.y), 20, 90);
+    }
+    
+    let y = 110;
+    if(player.morphBall){ this.ctx.fillText("MORPH [S]", 20, y); y += 20; }
+    if(player.doubleJump){ this.ctx.fillText("DOUBLE JUMP", 20, y); y += 20; }
+    if(saveSystem.hasSave){ this.ctx.fillText("SAVE EXISTS", 20, y); y += 20; }
+    
+    // Save message
+    if(this.saveTimer > 0){
+      this.saveTimer--;
+      this.ctx.fillStyle = "yellow";
+      this.ctx.fillText(this.saveMessage, 20, y);
+    }
+    
+    this.ctx.fillStyle = "gray";
+    this.ctx.font = "12px sans-serif";
+    this.ctx.fillText("CLICK: Shoot | WASD: Move | 1: Save | L: Load (title)", 20, 1000 - 20);
+  }
+}
+
+// =============================
+// GAME
+// =============================
+class Game {
+  constructor(){
+    this.em = new EntityManager();
+    this.input = new InputManager();
+    this.render = new RenderSystem(document.getElementById("c"));
+    this.render.resize();
+    onresize = () => this.render.resize();
+    
+    this.camera = {x:0, y:0};
+    
+    // Systems
+    this.playerSys = new PlayerSystem(this.input, this.em);
+    this.stateSys = new StateSystem(this.em);
+    this.bossSys = new BossSystem(this.em, null);
+    this.elevatorSys = new ElevatorSystem(this.em, this.input);
+    this.hazardSys = new HazardSystem(this.em, null);
+    this.thunderSys = new ThunderSystem(this.em, null);
+    this.bulletSys = new BulletSystem(this.em, this.input, this.camera);
+    this.combatSys = new CombatSystem(this.em, null);
+    this.particleSys = new ParticleSystem(this.em);
+    
+    // Connect particles
+    this.bossSys.particles = this.particleSys;
+    this.hazardSys.particles = this.particleSys;
+    this.thunderSys.particles = this.particleSys;
+    this.combatSys.particles = this.particleSys;
+    
+    // Room Manager
+    this.roomManager = new RoomManager(this.em, WORLD_SIZE);
+    
+    // Save System
+    this.saveSystem = new SaveSystem();
+    
+    // Create player
+    this.player = this.em.create({
+      Transform: C.Transform(100, 300, 30, 40),
+      Velocity: C.Velocity(),
+      Gravity: C.Gravity(),
+      Player: C.Player(),
+      Collider: C.Collider(),
+      Sprite: C.Sprite("white")
+    });
+    
+    // Try load save
+    if(this.saveSystem.hasSave){
+      this.saveSystem.load(this);
+    } else {
+      this.roomManager.loadRoom(0, 0, this.player);
+    }
+    
+    // Title screen flag
+    this.inTitle = !this.saveSystem.hasSave;
+    this.titleTimer = 0;
+    
+    window.game = this;
+    this.loop();
+  }
+  
+  update(){
+    this.input.update();
+    this.em.flush();
+    
+    // Title screen
+    if(this.inTitle){
+      this.titleTimer++;
+      if(this.input.keys["z"] || this.input.keys["Z"]){
+        this.inTitle = false;
+      }
+      if((this.input.keys["l"] || this.input.keys["L"]) && this.saveSystem.hasSave){
+        this.saveSystem.load(this);
+        this.inTitle = false;
+      }
+      return;
+    }
+    
+    // Save
+    if(this.input.saveKey && !this.prevSaveKey){
+      if(this.saveSystem.save(this)){
+        this.render.showSaveMessage("SAVED!");
+      }
+    }
+    this.prevSaveKey = this.input.saveKey;
+    
+    let time = Date.now();
+    let pt = this.player.Transform;
+    let p = this.player.Player;
+    
+    // Room transition
+    if(this.roomManager.checkTransition(this.player)){
+      this.roomManager.loadRoom(this.roomManager.wx, this.roomManager.wy, this.player);
+    }
+    
+    // Systems
+    let walls = this.roomManager.getCurrentWalls();
+    this.playerSys.update(walls);
+    new GravitySystem().update(this.em);
+    this.stateSys.update(pt, this.roomManager.getCurrentPlatforms(), time);
+    this.bossSys.update(pt);
+    this.elevatorSys.update(this.roomManager.getCurrentPlatforms());
+    this.hazardSys.update();
+    this.thunderSys.update();
+    new MovementSystem().update(this.em);
+    new CollisionSystem().update(this.em, this.roomManager.getCurrentPlatforms());
+    this.bulletSys.update();
+    this.bulletSys.tryShoot(this.player);
+    this.combatSys.update();
+    this.particleSys.update();
+    
+    // Items
+    this.checkItems();
+    
+    // Death
+    if(p.hp <= 0){
+      p.hp = p.maxHp;
+      pt.x = p.spawnX;
+      pt.y = p.spawnY;
+      p.inv = 60;
+    }
+    
+    // Camera
+    this.camera.x = pt.x - this.render.c.width / 2;
+    this.camera.y = pt.y - this.render.c.height / 2;
+  }
+  
+  checkItems(){
+    let t = this.player.Transform;
+    let p = this.player.Player;
+    
+    for(let item of this.em.query("Item","Transform")){
+      if(!Util.hit(t, item.Transform)) continue;
+      
+      switch(item.Item.type){
+        case "morph":
+          if(!p.morphBall){ p.morphBall = true; this.em.remove(item); }
+          break;
+        case "doubleJump":
+          if(!p.doubleJump){ p.doubleJump = true; this.em.remove(item); }
+          break;
+        case "coord":
+          if(!p.showCoords){ p.showCoords = true; this.em.remove(item); }
+          break;
+        case "savePoint":
+          p.spawnX = t.x;
+          p.spawnY = t.y;
+          this.render.showSaveMessage("SPAWN SET!");
+          break;
+      }
+    }
+  }
+  
+  draw(){
+    if(this.inTitle){
+      this.drawTitle();
+      return;
+    }
+    
+    this.render.draw(this.em, this.roomManager, this.camera);
+    this.render.drawUI(this.player.Player, this.roomManager, this.saveSystem);
+  }
+  
+  drawTitle(){
+    let ctx = this.render.ctx;
+    let c = this.render.c;
+    
+    ctx.fillStyle = "black";
+    ctx.fillRect(0, 0, c.width, c.height);
+    
+    ctx.fillStyle = "white";
+    ctx.font = "40px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("METROID ECS", c.width/2, c.height/2 - 50);
+    
+    ctx.font = "20px sans-serif";
+    let blink = Math.floor(this.titleTimer / 30) % 2 === 0;
+    if(blink) ctx.fillText("PRESS Z TO START", c.width/2, c.height/2 + 20);
+    
+    if(this.saveSystem.hasSave){
+      ctx.fillStyle = "cyan";
+      ctx.fillText("PRESS L TO LOAD", c.width/2, c.height/2 + 60);
+    }
+    
+    ctx.textAlign = "left";
+  }
+  
+  loop(){
+    this.update();
+    this.draw();
+    requestAnimationFrame(() => this.loop());
+  }
+}
+
+window.onload = () => new Game();
+</script>
+</body>
+</html>

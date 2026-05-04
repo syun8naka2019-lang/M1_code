@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Metroid ECS - STEP 3: Enemy AI StateSystem</title>
+<style>body{margin:0;overflow:hidden;background:black;}canvas{display:block;}</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// =============================
+// CONSTANTS
+// =============================
+const GRAVITY = 0.5;
+const SCREEN_WIDTH = 4000;
+const SCREEN_HEIGHT = 1000;
+
+// =============================
+// UTIL
+// =============================
+const Util = {
+  hit: (a,b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y,
+  clamp: (v,min,max) => Math.max(min, Math.min(max, v)),
+  dist: (a,b) => Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2)
+};
+
+// =============================
+// INPUT
+// =============================
+class InputManager {
+  constructor(){
+    this.keys = {};
+    this.prevKeys = {};
+    this.mouse = {x:0,y:0};
+    addEventListener("keydown", e => this.keys[e.key] = true);
+    addEventListener("keyup", e => this.keys[e.key] = false);
+    addEventListener("mousemove", e => {
+      let rect = document.getElementById("c").getBoundingClientRect();
+      this.mouse.x = e.clientX - rect.left;
+      this.mouse.y = e.clientY - rect.top;
+    });
+  }
+  
+  update(){ this.prevKeys = {...this.keys}; }
+  get left(){ return this.keys["ArrowLeft"] || this.keys["a"]; }
+  get right(){ return this.keys["ArrowRight"] || this.keys["d"]; }
+  get jump(){ return this.keys[" "] || this.keys["w"]; }
+  get morph(){ return this.keys["s"]; }
+  jumpPressed(){ return this.jump && !this.prevKeys[" "] && !this.prevKeys["w"]; }
+  morphPressed(){ return this.morph && !this.prevKeys["s"]; }
+}
+
+document.getElementById("c").addEventListener("mousedown", () => window.game && (window.game.input.mouseDown = true));
+document.getElementById("c").addEventListener("mouseup", () => window.game && (window.game.input.mouseDown = false));
+
+// =============================
+// COMPONENTS
+// =============================
+const C = {
+  Transform: (x,y,w,h) => ({x,y,w,h}),
+  Velocity: (vx=0,vy=0) => ({vx,vy}),
+  Gravity: (g=GRAVITY) => ({g}),
+  
+  Player: () => ({hp:5, maxHp:5, dir:1, inv:0, onGround:false, jumpCount:0, 
+                 morphBall:false, isMorph:false, doubleJump:false, spawnX:100, spawnY:300}),
+  
+  Enemy: (type="normal", hp=2) => ({type, hp, maxHp:hp}),
+  
+  // NEW: State Component for AI
+  State: (initial="idle") => ({ 
+    state: initial, 
+    timer: 0, 
+    mode: "orbit",      // For crazyFly2
+    angle: 0,           // For fly pattern
+    originX: 0,         // Spawn/origin position
+    originY: 0,
+    dir: 1,             // Movement direction
+    t: 0                // Frame counter
+  }),
+  
+  Collider: (solid=true, morphOnly=false) => ({solid, morphOnly}),
+  Item: (type) => ({type}),
+  Sprite: (color="white") => ({color}),
+  Bullet: (vx, vy, isEnemy=false, damage=1) => ({vx, vy, isEnemy, damage, life:120}),
+  Health: (hp=2) => ({hp, maxHp:hp}),
+  Team: (team="neutral") => ({team}),
+  Lifetime: (frames) => ({life:frames, max:frames})
+};
+
+// =============================
+// ENTITY MANAGER
+// =============================
+class EntityManager {
+  constructor(){
+    this.entities = [];
+    this.nextId = 0;
+    this.toRemove = [];
+  }
+  
+  create(components={}){
+    let e = {id:this.nextId++, ...components};
+    this.entities.push(e);
+    return e;
+  }
+  
+  remove(e){ this.toRemove.push(e); }
+  flush(){ this.entities = this.entities.filter(e => !this.toRemove.includes(e)); this.toRemove = []; }
+  query(...names){ return this.entities.filter(e => names.every(n => e[n] !== undefined)); }
+}
+
+// =============================
+// SYSTEMS
+// =============================
+class GravitySystem {
+  update(em){
+    for(let e of em.query("Velocity","Gravity")){
+      e.Velocity.vy += e.Gravity.g;
+      e.Velocity.vy = Math.min(e.Velocity.vy, 20);
+    }
+  }
+}
+
+class MovementSystem {
+  update(em){
+    for(let e of em.query("Transform","Velocity")){
+      e.Transform.x += e.Velocity.vx;
+      e.Transform.y += e.Velocity.vy;
+    }
+  }
+}
+
+class CollisionSystem {
+  update(em, platforms){
+    let players = em.query("Player","Transform","Velocity");
+    let enemies = em.query("Enemy","Transform","Velocity");
+    let movers = [...players, ...enemies];
+    
+    for(let e of movers){
+      let t = e.Transform;
+      let v = e.Velocity;
+      let isPlayer = !!e.Player;
+      let isEnemy = !!e.Enemy;
+      
+      // Reset onGround
+      if(isPlayer) e.Player.onGround = false;
+      if(isEnemy) e.Enemy.onGround = false;
+      
+      // Platform collision
+      for(let plat of platforms){
+        if(v.vy >= 0 && Util.hit(t, plat)){
+          t.y = plat.y - t.h;
+          v.vy = 0;
+          if(isPlayer){ e.Player.onGround = true; e.Player.jumpCount = 0; }
+          if(isEnemy){ e.Enemy.onGround = true; }
+        }
+      }
+      
+      // Screen bounds
+      if(isPlayer) t.x = Util.clamp(t.x, 0, 3950);
+    }
+  }
+}
+
+class PlayerSystem {
+  constructor(input, em){ this.input = input; this.em = em; }
+  
+  update(walls){
+    for(let e of this.em.query("Player","Transform","Velocity")){
+      let p = e.Player;
+      let t = e.Transform;
+      let v = e.Velocity;
+      
+      if(p.inv > 0) p.inv--;
+      
+      // Morph
+      if(this.input.morphPressed() && p.morphBall){
+        this.toggleMorph(e, walls);
+      }
+      
+      // Morph rolling
+      if(p.isMorph){
+        v.vx += Math.sign(v.vx) * 0.2;
+        v.vx *= 0.95;
+      }
+      
+      // Movement
+      if(this.input.left){ v.vx = -5; p.dir = -1; }
+      else if(this.input.right){ v.vx = 5; p.dir = 1; }
+      else if(!p.isMorph){ v.vx = 0; }
+      
+      // Jump
+      if(this.input.jumpPressed()){
+        this.doJump(e);
+      }
+      
+      t.x = Util.clamp(t.x, 0, 3950);
+    }
+  }
+  
+  doJump(e){
+    let p = e.Player;
+    let v = e.Velocity;
+    
+    if(p.onGround){
+      v.vy = -14;
+      p.jumpCount = 1;
+      p.onGround = false;
+    } else if(p.jumpCount < 2){
+      v.vy = -12;
+      p.jumpCount++;
+    } else if(p.doubleJump && p.jumpCount < 3){
+      v.vy = -12;
+      p.jumpCount++;
+    }
+  }
+  
+  toggleMorph(e, walls){
+    let p = e.Player;
+    let t = e.Transform;
+    
+    if(!p.isMorph){
+      p.isMorph = true;
+      t.h = 30;
+      t.y += 10;
+    } else {
+      let canStand = true;
+      let test = {x: t.x, y: t.y - 10, w: t.w, h: 40};
+      for(let w of walls){
+        if(Util.hit(test, w.Transform)){
+          canStand = false;
+          break;
+        }
+      }
+      if(canStand){
+        p.isMorph = false;
+        t.h = 40;
+        t.y -= 10;
+      }
+    }
+  }
+}
+
+// =============================
+// NEW: StateSystem - Enemy AI
+// =============================
+class StateSystem {
+  constructor(em){ this.em = em; }
+  
+  update(playerTransform, platforms, time){
+    for(let e of this.em.query("Enemy","State","Transform","Velocity")){
+      let s = e.State;
+      let t = e.Transform;
+      let v = e.Velocity;
+      let en = e.Enemy;
+      
+      s.timer++;
+      s.t++;
+      
+      // Initialize origin on first run
+      if(s.originX === 0 && s.originY === 0){
+        s.originX = t.x;
+        s.originY = t.y;
+      }
+      
+      let dx = playerTransform.x - t.x;
+      let dy = playerTransform.y - t.y;
+      let dist = Math.sqrt(dx*dx + dy*dy);
+      
+      // Route to type-specific AI
+      switch(en.type){
+        case "normal": this.aiNormal(e, s, t, v, dx, dy, time); break;
+        case "fly": this.aiFly(e, s, t, v, dx, dy, time); break;
+        case "hoverCrab": this.aiHoverCrab(e, s, t, v, dx, dy, time); break;
+        case "crazyFly": this.aiCrazyFly(e, s, t, v, dx, dy, time, dist); break;
+        case "crazyFly2": this.aiCrazyFly2(e, s, t, v, dx, dy, time); break;
+        case "factory": this.aiFactory(e, s, t, v, time); break;
+        case "volcano": this.aiVolcano(e, s, t, v, time); break;
+        case "jungle": this.aiJungle(e, s, t, v, dx, time); break;
+      }
+    }
+  }
+  
+  aiNormal(e, s, t, v, dx, dy, time){
+    // Chase player if close, otherwise wander
+    if(Math.abs(dx) < 300){
+      v.vx = Math.sign(dx) * 2 + Math.sin(time / 300);
+    } else {
+      v.vx = Math.sin(time / 500) * 2;
+    }
+    
+    // Random jump
+    if(Math.random() < 0.005 && e.Enemy.onGround){
+      v.vy = -8 - Math.random() * 4;
+    }
+    
+    v.vy = (v.vy || 0) + GRAVITY;
+    v.vy = Math.min(v.vy, 20);
+  }
+  
+  aiFly(e, s, t, v, dx, dy, time){
+    // Orbital movement around origin
+    s.angle += 0.05;
+    let radius = 50 + 20 * Math.sin(time / 300);
+    
+    // Target position
+    let tx = s.originX + Math.cos(s.angle) * radius;
+    let ty = s.originY + Math.sin(s.angle) * radius;
+    
+    // Smooth movement to target
+    t.x += (tx - t.x) * 0.1;
+    t.y += (ty - t.y) * 0.1;
+    
+    // Dash toward player occasionally
+    if(Math.random() < 0.01 && Math.abs(dx) < 200){
+      t.x += Math.sign(dx) * 5;
+      t.y += Math.sign(dy) * 5;
+    }
+    
+    v.vx = 0;
+    v.vy = 0;
+  }
+  
+  aiHoverCrab(e, s, t, v, dx, dy, time){
+    // Update origin to current (free movement)
+    s.originX = t.x;
+    s.originY = t.y;
+    
+    // Smooth follow with sine wave
+    v.vx = Math.sign(dx) * 2 + Math.sin(time / 200);
+    v.vy = Math.sign(dy) * 1 + Math.cos(time / 200);
+    
+    t.x += v.vx / 2;
+    t.y += v.vy;
+  }
+  
+  aiCrazyFly(e, s, t, v, dx, dy, time, dist){
+    // Tiny orbit
+    s.angle += 0.075;
+    let r = 10;
+    t.x = s.originX + Math.cos(s.angle) * r;
+    t.y = s.originY + Math.sin(s.angle) * r;
+    
+    // Shoot every 90 frames
+    if(s.t % 90 === 0){
+      let len = Math.sqrt(dx*dx + dy*dy);
+      if(len > 0){
+        this.shootBullet(t.x + t.w/2, t.y + t.h/2, dx/len*8, dy/len*8, true);
+      }
+    }
+    
+    // Dash phase every 60 frames
+    if(s.t % 60 < 20){
+      t.x += Math.sign(dx) * 10;
+      t.y += Math.sign(dy) * 1.9;
+      s.originX = t.x;
+      s.originY = t.y;
+    }
+  }
+  
+  aiCrazyFly2(e, s, t, v, dx, dy, time){
+    if(s.mode === "orbit"){
+      // Orbit around player
+      s.angle += 0.06;
+      let r = 120;
+      let tx = dx + Math.cos(s.angle) * r; // relative to player
+      let ty = dy + Math.sin(s.angle) * r;
+      
+      // Acceleration toward orbit position
+      let ax = (tx - (t.x - (t.x - dx))) * 0.05;
+      let ay = (ty - (t.y - (t.y - dy))) * 0.05;
+      v.vx = (v.vx || 0) + ax;
+      v.vy = (v.vy || 0) + ay;
+      v.vx *= 0.9;
+      v.vy *= 0.9;
+      
+      t.x += v.vx;
+      t.y += v.vy;
+      
+      // Charge attack every 180 frames
+      if(s.t % 180 === 0){
+        s.mode = "charge";
+        let len = Math.sqrt(dx*dx + dy*dy) || 1;
+        v.vx = dx / len * 5;
+        v.vy = dy / len * 5;
+      }
+    } else if(s.mode === "charge"){
+      // Dash toward player
+      t.x += v.vx;
+      t.y += v.vy;
+      v.vx *= 0.97;
+      v.vy *= 0.97;
+      
+      // Return to orbit when slow
+      if(Math.abs(v.vx) + Math.abs(v.vy) < 1){
+        s.mode = "orbit";
+      }
+    }
+  }
+  
+  aiFactory(e, s, t, v, time){
+    // Patrol back and forth
+    t.x += s.dir * 2;
+    if(t.x > 3000 || t.x < 500) s.dir *= -1;
+    
+    // Sine wave hover
+    t.y += Math.sin(time / 300) * 0.5;
+    v.vx = 0;
+    v.vy = 0;
+  }
+  
+  aiVolcano(e, s, t, v, time){
+    // Bobbing up and down
+    t.y += Math.sin(time / 200) * 2;
+    v.vx = 0;
+    v.vy = 0;
+  }
+  
+  aiJungle(e, s, t, v, dx, time){
+    // Simple chase
+    if(Math.abs(dx) < 200){
+      t.x += Math.sign(dx) * 2;
+    }
+  }
+  
+  shootBullet(x, y, vx, vy, isEnemy){
+    this.em.create({
+      Transform: C.Transform(x - 4, y - 4, 8, 8),
+      Bullet: C.Bullet(vx, vy, isEnemy, 1),
+      Sprite: C.Sprite(isEnemy ? "red" : "yellow"),
+      Team: C.Team(isEnemy ? "enemy" : "player")
+    });
+  }
+}
+
+// =============================
+// BULLET SYSTEM
+// =============================
+class BulletSystem {
+  constructor(em, input, camera){ this.em = em; this.input = input; this.camera = camera; }
+  
+  update(){
+    for(let b of this.em.query("Bullet","Transform")){
+      b.Transform.x += b.Bullet.vx;
+      b.Transform.y += b.Bullet.vy;
+      b.Bullet.life--;
+      
+      if(b.Bullet.life <= 0 || 
+         b.Transform.x < 0 || b.Transform.x > 4000 ||
+         b.Transform.y < 0 || b.Transform.y > 1000){
+        this.em.remove(b);
+      }
+    }
+  }
+  
+  tryShoot(playerEntity){
+    if(!this.input.mouseDown) return;
+    
+    let t = playerEntity.Transform;
+    let aimX = this.input.mouse.x + this.camera.x;
+    let aimY = this.input.mouse.y + this.camera.y;
+    
+    let dx = aimX - (t.x + t.w/2);
+    let dy = aimY - (t.y + t.h/2);
+    let len = Math.sqrt(dx*dx + dy*dy);
+    if(len === 0) return;
+    
+    let speed = 12;
+    this.em.create({
+      Transform: C.Transform(t.x + t.w/2 - 4, t.y + t.h/2 - 4, 8, 8),
+      Bullet: C.Bullet(dx/len*speed, dy/len*speed, false, 1),
+      Sprite: C.Sprite("yellow"),
+      Team: C.Team("player")
+    });
+  }
+}
+
+// =============================
+// COMBAT SYSTEM
+// =============================
+class CombatSystem {
+  constructor(em, particles){ this.em = em; this.particles = particles; }
+  
+  update(){
+    let bullets = this.em.query("Bullet","Transform");
+    let enemies = this.em.query("Enemy","Transform","Health");
+    let players = this.em.query("Player","Transform");
+    
+    // Player bullets hit enemies
+    for(let b of bullets){
+      if(b.Bullet.isEnemy) continue;
+      
+      for(let e of enemies){
+        if(Util.hit(b.Transform, e.Transform)){
+          e.Health.hp -= b.Bullet.damage;
+          this.em.remove(b);
+          this.particles.spawn(e.Transform.x + e.Transform.w/2, e.Transform.y + e.Transform.h/2, 10, ["orange","yellow"]);
+          
+          if(e.Health.hp <= 0){
+            this.em.remove(e);
+            this.particles.spawn(e.Transform.x + e.Transform.w/2, e.Transform.y + e.Transform.h/2, 20, ["red","orange"]);
+          }
+          break;
+        }
+      }
+    }
+    
+    // Enemy bullets hit player
+    for(let b of bullets){
+      if(!b.Bullet.isEnemy) continue;
+      
+      for(let p of players){
+        if(p.Player.inv <= 0 && Util.hit(b.Transform, p.Transform)){
+          p.Player.hp -= b.Bullet.damage;
+          p.Player.inv = 60;
+          this.em.remove(b);
+        }
+      }
+    }
+    
+    // Enemy touch damage
+    for(let p of players){
+      if(p.Player.inv > 0) continue;
+      
+      for(let e of enemies){
+        if(Util.hit(p.Transform, e.Transform)){
+          p.Player.hp -= 1;
+          p.Player.inv = 60;
+          p.Velocity.vx += p.Transform.x < e.Transform.x ? -8 : 8;
+          p.Velocity.vy = -6;
+        }
+      }
+    }
+  }
+}
+
+// =============================
+// PARTICLE SYSTEM
+// =============================
+class ParticleSystem {
+  constructor(em){ this.em = em; }
+  
+  spawn(x, y, count, colors){
+    for(let i = 0; i < count; i++){
+      this.em.create({
+        Transform: C.Transform(x, y, 4, 4),
+        Velocity: C.Velocity((Math.random()-0.5)*10, (Math.random()-0.5)*10),
+        Sprite: C.Sprite(colors[Math.floor(Math.random()*colors.length)]),
+        Lifetime: C.Lifetime(30)
+      });
+    }
+  }
+  
+  update(){
+    for(let p of this.em.query("Lifetime","Transform")){
+      p.Velocity.vy += 0.2;
+      p.Lifetime.life--;
+      if(p.Lifetime.life <= 0) this.em.remove(p);
+    }
+  }
+}
+
+// =============================
+// RENDER SYSTEM
+// =============================
+class RenderSystem {
+  constructor(canvas){ 
+    this.c = canvas; 
+    this.ctx = canvas.getContext("2d");
+  }
+  
+  resize(){ this.c.width = innerWidth; this.c.height = innerHeight; }
+  
+  draw(em, platforms, walls, camera, roomColor){
+    this.ctx.clearRect(0, 0, this.c.width, this.c.height);
+    this.ctx.save();
+    this.ctx.translate(-camera.x, -camera.y);
+    
+    this.ctx.fillStyle = roomColor || "#0b1f0b";
+    this.ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    
+    // Platforms
+    this.ctx.fillStyle = "green";
+    for(let p of platforms) this.ctx.fillRect(p.x, p.y, p.w, p.h);
+    
+    // Walls
+    this.ctx.fillStyle = "gray";
+    for(let w of walls){
+      let t = w.Transform;
+      this.ctx.fillRect(t.x, t.y, t.w, t.h);
+    }
+    
+    // Items
+    for(let item of em.query("Item","Transform")){
+      let t = item.Transform;
+      switch(item.Item.type){
+        case "morph": this.ctx.fillStyle = "orange"; break;
+        case "doubleJump": this.ctx.fillStyle = "gold"; break;
+      }
+      this.ctx.fillRect(t.x, t.y, 30, 30);
+    }
+    
+    // Bullets
+    for(let b of em.query("Bullet","Transform")){
+      this.ctx.fillStyle = b.Bullet.isEnemy ? "red" : "yellow";
+      this.ctx.fillRect(b.Transform.x, b.Transform.y, 8, 8);
+    }
+    
+    // Particles
+    for(let p of em.query("Lifetime","Transform")){
+      let alpha = p.Lifetime.life / p.Lifetime.max;
+      this.ctx.globalAlpha = alpha;
+      this.ctx.fillStyle = p.Sprite ? p.Sprite.color : "white";
+      this.ctx.fillRect(p.Transform.x, p.Transform.y, 4, 4);
+      this.ctx.globalAlpha = 1;
+    }
+    
+    // Enemies with type-specific rendering
+    for(let e of em.query("Enemy","Transform","Health","State")){
+      let t = e.Transform;
+      let s = e.State;
+      
+      // Type-based color
+      switch(e.Enemy.type){
+        case "fly":
+        case "crazyFly":
+        case "crazyFly2":
+          this.ctx.fillStyle = "cyan";
+          // Wing flapping animation
+          let wingOffset = Math.sin(s.t / 5) * 5;
+          this.ctx.beginPath();
+          this.ctx.ellipse(t.x + t.w/2, t.y + t.h/2, t.w, t.h/2 + wingOffset, 0, 0, Math.PI*2);
+          this.ctx.fill();
+          break;
+        case "factory":
+          this.ctx.save();
+          this.ctx.translate(t.x + t.w/2, t.y + t.h/2);
+          s.angle = (s.angle || 0) + 0.02;
+          this.ctx.rotate(s.angle);
+          this.ctx.fillStyle = "magenta";
+          for(let i = 0; i < 4; i++){
+            this.ctx.fillRect(Math.cos(i*Math.PI/2)*15-5, Math.sin(i*Math.PI/2)*15-5, 10, 10);
+          }
+          this.ctx.restore();
+          break;
+        case "volcano":
+          this.ctx.fillStyle = "orange";
+          this.ctx.beginPath();
+          this.ctx.moveTo(t.x, t.y + t.h);
+          this.ctx.lineTo(t.x + t.w/2, t.y);
+          this.ctx.lineTo(t.x + t.w, t.y + t.h);
+          this.ctx.closePath();
+          this.ctx.fill();
+          break;
+        default:
+          this.ctx.fillStyle = "red";
+          this.ctx.fillRect(t.x, t.y, t.w, t.h);
+      }
+      
+      // HP bar
+      this.ctx.fillStyle = "black";
+      this.ctx.fillRect(t.x, t.y - 8, t.w, 4);
+      this.ctx.fillStyle = "lime";
+      this.ctx.fillRect(t.x, t.y - 8, t.w * (e.Health.hp / e.Health.maxHp), 4);
+    }
+    
+    // Player
+    for(let e of em.query("Player","Transform")){
+      let t = e.Transform;
+      let p = e.Player;
+      
+      if(p.inv > 0 && Math.floor(p.inv / 5) % 2 === 0){
+        this.ctx.fillStyle = "red";
+      } else {
+        this.ctx.fillStyle = "white";
+      }
+      
+      if(p.isMorph){
+        this.ctx.beginPath();
+        this.ctx.arc(t.x + t.w/2, t.y + t.h/2, t.w/2, 0, Math.PI*2);
+        this.ctx.fill();
+      } else {
+        this.ctx.fillRect(t.x, t.y, t.w, t.h);
+      }
+      
+      if(p.inv > 0){
+        this.ctx.globalAlpha = (p.inv % 20 < 10) ? 0.3 : 0.1;
+        this.ctx.fillStyle = "red";
+        this.ctx.fillRect(t.x - 5, t.y - 5, t.w + 10, t.h + 10);
+        this.ctx.globalAlpha = 1;
+      }
+    }
+    
+    this.ctx.restore();
+  }
+  
+  drawUI(player){
+    this.ctx.fillStyle = "white";
+    this.ctx.font = "16px sans-serif";
+    this.ctx.fillText("HP: " + player.hp, 20, 30);
+    
+    let y = 50;
+    if(player.morphBall){ this.ctx.fillText("MORPH [S]", 20, y); y += 20; }
+    if(player.doubleJump){ this.ctx.fillText("DOUBLE JUMP", 20, y); y += 20; }
+    
+    this.ctx.fillStyle = "gray";
+    this.ctx.font = "12px sans-serif";
+    this.ctx.fillText("CLICK: Shoot | WASD: Move | SPACE: Jump", 20, SCREEN_HEIGHT - 20);
+  }
+}
+
+// =============================
+// GAME
+// =============================
+class Game {
+  constructor(){
+    this.em = new EntityManager();
+    this.input = new InputManager();
+    this.render = new RenderSystem(document.getElementById("c"));
+    this.render.resize();
+    onresize = () => this.render.resize();
+    
+    this.camera = {x:0, y:0};
+    
+    // Systems
+    this.playerSys = new PlayerSystem(this.input, this.em);
+    this.stateSys = new StateSystem(this.em);
+    this.bulletSys = new BulletSystem(this.em, this.input, this.camera);
+    this.combatSys = new CombatSystem(this.em, null);
+    this.particleSys = new ParticleSystem(this.em);
+    this.combatSys.particles = this.particleSys;
+    
+    this.setupRoom();
+    
+    window.game = this;
+    this.loop();
+  }
+  
+  setupRoom(){
+    // Player
+    this.player = this.em.create({
+      Transform: C.Transform(100, 300, 30, 40),
+      Velocity: C.Velocity(),
+      Gravity: C.Gravity(),
+      Player: C.Player(),
+      Collider: C.Collider(),
+      Sprite: C.Sprite("white")
+    });
+    
+    // Platforms
+    this.platforms = [
+      {x:0, y:550, w:4000, h:50},
+      {x:200, y:450, w:200, h:20},
+      {x:600, y:350, w:200, h:20},
+      {x:1000, y:450, w:200, h:20},
+      {x:1500, y:300, w:200, h:20}
+    ];
+    
+    // Walls
+    this.walls = [
+      this.em.create({Transform: C.Transform(0, 0, 20, 600), Collider: C.Collider()}),
+      this.em.create({Transform: C.Transform(3980, 0, 20, 600), Collider: C.Collider()})
+    ];
+    
+    // Items
+    this.em.create({Transform: C.Transform(1800, 500, 30, 30), Item: C.Item("morph")});
+    this.em.create({Transform: C.Transform(650, 320, 30, 30), Item: C.Item("doubleJump")});
+    
+    // Enemies - All types for testing
+    this.spawnEnemy(800, 500, "normal", 2);
+    this.spawnEnemy(1200, 400, "fly", 3);
+    this.spawnEnemy(1600, 500, "hoverCrab", 3);
+    this.spawnEnemy(2000, 450, "crazyFly", 4);
+    this.spawnEnemy(2400, 400, "crazyFly2", 5);
+    this.spawnEnemy(2800, 500, "factory", 4);
+    this.spawnEnemy(3200, 500, "volcano", 3);
+    this.spawnEnemy(3500, 500, "jungle", 2);
+  }
+  
+  spawnEnemy(x, y, type, hp){
+    this.em.create({
+      Transform: C.Transform(x, y, 30, 30),
+      Velocity: C.Velocity(),
+      Enemy: C.Enemy(type, hp),
+      Health: C.Health(hp),
+      State: C.State("idle"),
+      Sprite: C.Sprite("red"),
+      Collider: C.Collider(false)
+    });
+  }
+  
+  update(){
+    this.input.update();
+    this.em.flush();
+    
+    let time = Date.now();
+    let pt = this.player.Transform;
+    
+    // Systems
+    this.playerSys.update(this.walls);
+    new GravitySystem().update(this.em);
+    this.stateSys.update(pt, this.platforms, time);
+    new MovementSystem().update(this.em);
+    new CollisionSystem().update(this.em, this.platforms);
+    this.bulletSys.update();
+    this.bulletSys.tryShoot(this.player);
+    this.combatSys.update();
+    this.particleSys.update();
+    
+    // Items
+    this.checkItems();
+    
+    // Death
+    let p = this.player.Player;
+    if(p.hp <= 0){
+      p.hp = p.maxHp;
+      this.player.Transform.x = p.spawnX;
+      this.player.Transform.y = p.spawnY;
+      p.inv = 60;
+    }
+    
+    // Camera
+    this.camera.x = pt.x - this.render.c.width / 2;
+    this.camera.y = pt.y - this.render.c.height / 2;
+  }
+  
+  checkItems(){
+    let t = this.player.Transform;
+    let p = this.player.Player;
+    
+    for(let item of this.em.query("Item","Transform")){
+      if(!Util.hit(t, item.Transform)) continue;
+      
+      if(item.Item.type === "morph" && !p.morphBall){
+        p.morphBall = true;
+        this.em.remove(item);
+      }
+      if(item.Item.type === "doubleJump" && !p.doubleJump){
+        p.doubleJump = true;
+        this.em.remove(item);
+      }
+    }
+  }
+  
+  draw(){
+    this.render.draw(this.em, this.platforms, this.walls, this.camera, "#0b1f0b");
+    this.render.drawUI(this.player.Player);
+  }
+  
+  loop(){
+    this.update();
+    this.draw();
+    requestAnimationFrame(() => this.loop());
+  }
+}
+
+window.onload = () => new Game();
+</script>
+</body>
+</html>
