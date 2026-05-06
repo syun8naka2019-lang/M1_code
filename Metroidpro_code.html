@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Metroid FINAL COMPLETE+ 修正版（new31）</title>
-<style>body{margin:0;overflow:hidden;background:black;}canvas{display:block;}</style>
+<style>body{margin:0;overflow:hidden;background:black;touch-action:none;user-select:none;-webkit-user-select:none;}canvas{display:block;touch-action:none;}</style>
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -13,7 +13,8 @@ function resize(){c.width=innerWidth;c.height=innerHeight;}onresize=resize;resiz
 
 // ===== STATE =====
 let gameState="title";
-let loadTimer=120;
+let loadTimer=9; // 約0.15秒（最短）
+let isLoadFromSave = false; // セーブデータ読み込みフラグ
 let saveEnabled = true;
 let hasSave = false;
 try {
@@ -34,6 +35,17 @@ let particles = [];
 let player={x:100,y:300,spawnX:100,spawnY:300,w:30,h:40,vx:0,vy:0,onGround:false,dir:1,hp:5,maxHp:5,doubleJump:false,morphBall:false,isMorph:false,jumpCount:0,prevX:100,prevY:300};
 let keys={},gravity=0.5,bullets=[],enemyBullets=[],camX=0,camY=0,inv=0;
 let jumpPressed = false;
+// ===== MOBILE TOUCH =====
+let touches = {}; // アクティブなタッチ追跡
+let isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+// 仮想ボタン定義
+let mobileButtons = {
+  left:   { x: 80,  y: 0,   r: 50, key: 'ArrowLeft' },  // 左下
+  right:  { x: 200, y: 0,   r: 50, key: 'ArrowRight' }, // 左下
+  jump:   { x: 0,   y: 0,   r: 50, key: ' ' },          // 左下（上）
+  shoot:  { x: 0,   y: 0,   r: 60, key: 'z' },         // 右下
+  morph:  { x: 0,   y: 0,   r: 50, key: 's' }          // 右下（上）
+};
 // ===== SOUND =====
 let bgm = new Audio("title.wav");
 bgm.loop = true;
@@ -52,9 +64,10 @@ let wx=0,wy=0;
 
 let rooms={//4/5
 
- jungle:{color:"#0b1f0b",platforms:[{x:0,y:550,w:4000,h:50},{x:200,y:450,w:200,h:20},{x:500,y:350,w:200,h:20},{x:900,y:480,w:200,h:20},{x:1300,y:400,w:200,h:20},{x:2300,y:470,w:80,h:20,isElev:true}],
- walls:[{x:0,y:0,w:20,h:600},{x:3980,y:0,w:20,h:600}],hidden:{x:1000,y:580,w:100,h:30},warp:{x:1750,y:260,w:60,h:60},secretPass:{x:1720,y:320,w:80,h:40},
- stones:[{x:1800,y:490,w:40,h:60,text:"エレベーターはWで上昇\nSで下降\n思い切って下降すると\n地下火山エリアが？？",show:false},{x:3500,y:490,w:40,h:60,text:"x座標3500",show:false},{x:3500,y:710,w:40,h:60,text:"ここは惑星フォーミュラ、地球にうり二つの惑星だ。",show:false}]},
+ jungle:
+ {color:"#0b1f0b",platforms:[{x:0,y:550,w:4000,h:50},{x:200,y:450,w:200,h:20},{x:500,y:350,w:200,h:20},{x:900,y:480,w:200,h:20},{x:1300,y:400,w:200,h:20},{x:2300,y:470,w:80,h:20,isElev:true}],
+ walls:[{x:0,y:0,w:20,h:600},{x:3980,y:0,w:20,h:600}],hidden:{x:1000,y:580,w:100,h:30},warp:{x:1750,y:260,w:60,h:60},secretPass:{x:3700,y:500,w:80,h:40},
+ stones:[{x:1800,y:490,w:40,h:60,text:"エレベーターはWで上昇\nSで下降\n思い切って下降すると\n都市エリアが？？",show:false},{x:3500,y:490,w:40,h:60,text:"x座標3500",show:false},{x:3500,y:710,w:40,h:60,text:"ここは惑星フォーミュラ、地球にうり二つの惑星だ。",show:false}]},
 
  volcano:{color:"#2b0f0f",platforms:[
   {x:0,y:550,w:1900,h:50},     // 左床
@@ -581,6 +594,11 @@ function loadGame(){
     Object.assign(player, d.player);
     world = JSON.parse(JSON.stringify(d.world));
 
+     // ロード画面表示後にゲームへ
+    gameState = "loading";
+    loadTimer = 9; // 約0.15秒
+    isLoadFromSave = true; // セーブからの読み込みフラグ
+
     gameState = "game";
     camX = player.x - c.width / 2;
     camY = player.y - c.height / 2;
@@ -606,7 +624,7 @@ function update(){
 
   // ▼ loading専用処理
   if(gameState==="loading"){
-
+    // タイマーでロード画面時間管理（draw()と共通）
     for(let i=0;i<2;i++){
 
       if(genY < size){
@@ -661,7 +679,8 @@ roomState = { doubleJumpTaken:false };
         loadStep = Math.floor((genY*size+genX)/(size*size)*4);
 
       }else{
-        gameState="game";
+        // 生成完了 - draw()のタイマーでgameState変更するのでここではしない
+        loadStep = 4; // 進行度100%表示
         break;
       }
 
@@ -845,7 +864,7 @@ for(let p of particles){
 particles = particles.filter(p => p.life > 0);
 
  // special areas
- if(room.secretPass && hit(player,room.secretPass)){wx=Math.min(size-1,wx+1);player.x=100;bullets=[];enemyBullets=[];}
+ if(room.secretPass && hit(player,room.secretPass)){wx=0;wy=2;player.x=100;bullets=[];enemyBullets=[];}
  if(room.warpToMorph && hit(player,room.warpToMorph)){
   wx = 0;
   wy = size - 1;
@@ -925,7 +944,7 @@ if(room.warpTower && hit(player,room.warpTower)){
   bullets=[];enemyBullets=[];
 }
 
- if(room.hidden && hit(player,room.hidden)){wx=Math.min(size-1,wx+1);player.x=50;bullets=[];enemyBullets=[];}
+ if(room.hidden && hit(player,room.hidden)){wx=3;wy=2;player.x=100;bullets=[];enemyBullets=[];}
  if(room.lava && hit(player,room.lava) && inv<=0){player.hp--;hitStop=6;shake=10;player.x=player.spawnX;player.y=player.spawnY;inv=60;for(let i=0;i<15;i++){particles.push({x:player.x+player.w/2,y:player.y+player.h/2,vx:(Math.random()-0.5)*10,vy:(Math.random()-0.5)*10,life:20,color:"orange"});}}
 
 // 落とし穴
@@ -1441,6 +1460,39 @@ function drawEnemies(){
   }
 }
 
+// ===== MOBILE UI =====
+function updateMobileButtons(){
+  if(!isMobile) return;
+  let h = c.height;
+  let w = c.width;
+  // 左下：方向キー
+  mobileButtons.left.x = 80;
+  mobileButtons.left.y = h - 100;
+  mobileButtons.right.x = 200;
+  mobileButtons.right.y = h - 100;
+  mobileButtons.jump.x = 140;
+  mobileButtons.jump.y = h - 180;
+  // 右下：アクションボタン
+  mobileButtons.shoot.x = w - 100;
+  mobileButtons.shoot.y = h - 100;
+  mobileButtons.morph.x = w - 100;
+  mobileButtons.morph.y = h - 200;
+}
+
+function drawMobileUI(){
+  if(!isMobile || gameState !== "game") return;
+  updateMobileButtons();
+  ctx.globalAlpha = 0.3;
+  for(let name in mobileButtons){
+    let btn = mobileButtons[name];
+    ctx.fillStyle = keys[btn.key] ? "#00ff00" : "#ffffff";
+    ctx.beginPath();
+    ctx.arc(btn.x, btn.y, btn.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
 // ===== DRAW =====
 
 
@@ -1468,11 +1520,15 @@ function draw(){
  }
 //Load-----------------------------
 
- if(gameState==="loading"){ctx.fillStyle="black";ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle="white";ctx.font="30px sans-serif";ctx.fillText("Loading...",c.width/2-50,c.height/2); 
+ if(gameState==="loading")
+ {ctx.fillStyle="black";ctx.fillRect(0,0,c.width,c.height);
+ ctx.fillStyle="white";ctx.font="30px sans-serif";
+ ctx.fillText("Loading...",c.width/2-50,c.height/2-100); 
  ctx.fillStyle="lime";
   ctx.font="20px monospace";
 
-  let t = Math.floor(Date.now()/200)%4;
+
+  let t = loadStep; // 生成進行度に連動して行表示
 
   let lines = [
     ">> world data initializing",
@@ -1481,7 +1537,7 @@ function draw(){
     ">> system check"
   ];
 
-  // 進行っぽく1行ずつ表示
+  // 1回だけ順番に表示（全行表示後は固定）
   for(let i=0;i<lines.length;i++){
     if(i <= t){
       ctx.fillText(lines[i], c.width/2-150, c.height/2 + i*30);
@@ -1493,6 +1549,14 @@ function draw(){
     ctx.fillText("_", c.width/2+150, c.height/2 + t*30);
   }
 
+    // 新規ゲーム時：テキスト4行表示完了後に遷移
+  if(!isLoadFromSave && t >= 3){
+    loadTimer--;
+    if(loadTimer <= 0){
+      gameState = "game";
+    }
+    
+  }
   return;
 }
 
@@ -1836,7 +1900,10 @@ if(room.stones){
  }
 
 ctx.fillText("ROOM:" + roomType,20,40);
- drawMini();
+drawMini();
+
+// スマホ用仮想ボタン描画
+drawMobileUI();
 
 // 座標表示（coordItem取得後）
 if(player.showCoords){
@@ -1853,7 +1920,8 @@ addEventListener("keydown",e=>{
   keys[e.key]=true;
 
   if(gameState==="title" && e.key.toLowerCase()==="z"){
-    gameState="loading"; 
+    gameState="loading";
+    loadTimer = 30; // ロードタイマーリセット（0.15秒）
     bgm.play().catch(() => {});
 
     world = [];
@@ -1907,6 +1975,43 @@ addEventListener("keydown",e=>{
 });
 
 addEventListener("keyup",e=>keys[e.key]=false);
+
+// ===== MOBILE TOUCH EVENTS =====
+// タッチ開始
+addEventListener("touchstart",e=>{
+  e.preventDefault();
+  for(let touch of e.changedTouches){
+    let x = touch.clientX;
+    let y = touch.clientY;
+    let id = touch.identifier;
+    
+    // 仮想ボタンチェック
+    for(let btnName in mobileButtons){
+      let btn = mobileButtons[btnName];
+      let dx = x - btn.x;
+      let dy = y - btn.y;
+      if(Math.sqrt(dx*dx + dy*dy) < btn.r){
+        keys[btn.key] = true;
+        touches[id] = { btn: btnName };
+        break;
+      }
+    }
+  }
+},{passive:false});
+
+// タッチ終了
+addEventListener("touchend",e=>{
+  e.preventDefault();
+  for(let touch of e.changedTouches){
+    let id = touch.identifier;
+    if(touches[id]){
+      let btnName = touches[id].btn;
+      let btn = mobileButtons[btnName];
+      keys[btn.key] = false;
+      delete touches[id];
+    }
+  }
+},{passive:false});
 
 //Save and Load----------------------------
 addEventListener("keydown",e=>{
